@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: market-data
+  group: ticker
   cancel-in-progress: false
 
 permissions:
