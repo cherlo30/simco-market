@@ -99,6 +99,14 @@ def heure_de(ts):
     return ts[:13]              # AAAA-MM-JJTHH
 
 
+def iso(x):
+    """Normalise la date de mise en vente donnee par le jeu
+    (2026-09-04T13:15:47.515470+00:00) au format court."""
+    if not x or len(x) < 19:
+        return ""
+    return x[:19] + "Z"
+
+
 # ------------------------------------------------------------------- git
 
 def git(*a, entree=None):
@@ -274,7 +282,9 @@ def traiter(kind, book, ordres, agg, volp, ts):
             if av is None:
                 ordres[oid] = {"kind": kind, "q": q, "sid": str(
                     (o.get("seller") or {}).get("id", "")), "p": p, "qt": qt,
-                    "vu": ts, "maj": ts, "delta": ""}
+                    # la vraie date de mise en vente, donnee par le jeu, et
+                    # non le moment ou le collecteur a decouvert l'offre
+                    "vu": iso(o.get("posted")) or ts, "maj": ts, "delta": ""}
                 continue
             delta = av["qt"] - qt
             if delta > 0:

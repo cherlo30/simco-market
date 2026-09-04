@@ -10,7 +10,8 @@
   --plane:#f9f9f7; --surface:#fcfcfb;
   --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
   --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
+  --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
   --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
   --band:rgba(42,120,214,.13);
 }
@@ -20,7 +21,8 @@
     --plane:#0d0d0d; --surface:#1a1a19;
     --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
     --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
-    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+    --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
     --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
     --band:rgba(57,135,229,.16);
   }
@@ -30,7 +32,8 @@
   --plane:#0d0d0d; --surface:#1a1a19;
   --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
   --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
+  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
   --band:rgba(57,135,229,.16);
 }
 *{box-sizing:border-box}
@@ -70,7 +73,7 @@ table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font
 th{text-align:right;font-weight:500;color:var(--muted);font-size:11px;
   text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--grid)}
 th:first-child,td:first-child{text-align:left}
-td{padding:6px 8px;border-bottom:1px solid var(--grid)}
+td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right}
 tr:last-child td{border-bottom:0}
 .scroll{overflow-x:auto;margin:0 -16px;padding:0 16px}
 .note{font-size:12px;color:var(--ink2);margin:10px 0 12px;padding:10px 12px;
@@ -84,6 +87,17 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 .pastille{display:inline-block;width:7px;height:7px;border-radius:50%;
   background:var(--good);margin-right:5px;vertical-align:middle}
 .moi{color:var(--s2);font-weight:600}
+.qbox{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.qbox label{display:inline-flex;align-items:center;gap:5px;margin:0;
+  font-size:12px;text-transform:none;letter-spacing:0;color:var(--ink2);
+  background:var(--surface);border:1px solid var(--ring);border-radius:999px;
+  padding:5px 11px;cursor:pointer;user-select:none;line-height:1}
+.qbox label.on{border-color:var(--s1);color:var(--ink)}
+.qbox input{accent-color:var(--s1);margin:0;cursor:pointer}
+.leg{display:flex;flex-wrap:wrap;gap:14px;margin:2px 0 10px;font-size:12px;
+  color:var(--ink2)}
+.leg span{display:inline-flex;align-items:center;gap:6px}
+.leg i{width:14px;height:2px;border-radius:1px;display:inline-block}
 </style>
 </head>
 <body>
@@ -93,14 +107,20 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 
 <div class="bar">
   <div><label for="res">Ressource</label><select id="res"></select></div>
-  <div><label for="qual">Qualite</label><select id="qual"></select></div>
   <div><label for="jours">Periode</label>
     <select id="jours">
+      <option value="0.25">6 heures</option>
+      <option value="0.5">12 heures</option>
       <option value="1">24 heures</option>
+      <option value="3">3 jours</option>
       <option value="7" selected>7 jours</option>
+      <option value="14">14 jours</option>
       <option value="30">30 jours</option>
-      <option value="999">Tout</option>
+      <option value="90">90 jours</option>
+      <option value="9999">Tout</option>
     </select></div>
+  <div style="flex:1 1 280px"><label>Qualite</label>
+    <div class="qbox" id="qual"></div></div>
 </div>
 
 <div class="kpis" id="kpis"></div>
@@ -113,7 +133,7 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 
 <div class="card">
   <h2>Prix heure par heure</h2>
-  <p class="h">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
+  <p class="h" id="h_prix">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
   <div id="c_prix"></div><div class="tip" id="t_prix"></div>
 </div>
 
@@ -176,6 +196,18 @@ const prix = v => v == null || !isFinite(v) ? "—" : v === 0 ? "0" :
     : {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const ent = v => v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("fr-FR");
 
+// une duree en clair : 3 j 5 h · 2 h 14 min · 8 min · a l'instant
+function duree(ms) {
+  if (ms == null || !isFinite(ms) || ms < 0) return "—";
+  const min = Math.floor(ms / 60000);
+  if (min < 1) return "a l'instant";
+  if (min < 60) return min + " min";
+  const h = Math.floor(min / 60), r = min % 60;
+  if (h < 24) return h + " h" + (r ? " " + r + " min" : "");
+  const j = Math.floor(h / 24), rh = h % 24;
+  return j + " j" + (rh ? " " + rh + " h" : "");
+}
+
 /* ---------- lecture ------------------------------------------------ */
 
 async function charge(url, relatif) {
@@ -216,7 +248,9 @@ let ORDRES = [];              // le carnet vivant, toutes ressources
 let HORAIRE = new Map();      // "kind|quality" -> lignes triees par heure
 let VOLUME = [];              // volumes par prix de la ressource affichee
 let VOL_KIND = null;
+let SELQ = new Set();         // les qualites cochees
 let AGE = "";                 // fraicheur du carnet
+const COUL = i => "var(--s" + ((i % 8) + 1) + ")";
 
 function moisRecents(n) {
   const d = new Date(), out = [];
@@ -279,12 +313,17 @@ async function demarrer() {
   sel.value = kinds.includes(146) ? "146" : String(kinds[0]);
 
   const maj = ORDRES.reduce((m, o) => o.maj > m ? o.maj : m, "");
-  const retard = maj ? Math.round((Date.now() - new Date(maj).getTime()) / 60000) : null;
-  AGE = retard == null ? "" : (retard < 2 ? "a l'instant" : "il y a " + retard + " min");
+  AGE = maj ? (d => d === "a l'instant" ? d : "il y a " + d)
+    (duree(Date.now() - new Date(maj).getTime())) : "";
+  // une "heure d'historique" = une heure de marche, pas une ligne de fichier
+  const heures = new Set(hist.map(r => r.heure));
+  const bornes = [...heures].sort();
+  const jour = t => t ? t.slice(8, 10) + "/" + t.slice(5, 7) : "";
   document.getElementById("sub").innerHTML =
     '<span class="pastille"></span>' + ent(ORDRES.length) + " offres en vente sur " +
     kinds.length + " ressources · carnet mis a jour " + AGE +
-    " · " + ent(hist.length) + " heures d'historique";
+    " · historique : " + heures.size + " heures de marche, du " +
+    jour(bornes[0]) + " au " + jour(bornes[bornes.length - 1]);
   document.getElementById("foot").textContent =
     "Le carnet est reecrit toutes les 5 minutes. L'historique est fige heure par heure.";
 
@@ -296,21 +335,32 @@ async function demarrer() {
 
 async function changerRessource() {
   const k = document.getElementById("res").value;
-  const qs = [...new Set(ORDRES.filter(o => o.k == k).map(o => o.q))]
-    .concat([...HORAIRE.keys()].filter(c => c.split("|")[0] === k)
-      .map(c => +c.split("|")[1]))
-    .filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
-  const sel = document.getElementById("qual");
-  const avant = sel.value;
-  sel.innerHTML = "";
-  for (const q of (qs.length ? qs : [0])) {
-    const o = document.createElement("option");
-    o.value = q;
-    o.textContent = q === 0 ? "0 etoile" : q + (q > 1 ? " etoiles" : " etoile");
-    sel.appendChild(o);
-  }
-  sel.value = (avant !== "" && qs.includes(+avant)) ? avant
-            : (qs.includes(0) ? "0" : String(qs[0] ?? 0));
+  const qs = [...new Set([
+    ...ORDRES.filter(o => o.k == k).map(o => o.q),
+    ...[...HORAIRE.keys()].filter(c => c.split("|")[0] === k).map(c => +c.split("|")[1])
+  ])].sort((a, b) => a - b);
+  if (!qs.length) qs.push(0);
+
+  const garde = new Set([...SELQ].filter(q => qs.includes(q)));
+  SELQ = garde.size ? garde : new Set([qs.includes(0) ? 0 : qs[0]]);
+
+  const box = document.getElementById("qual");
+  box.innerHTML = '<label id="l_tout"><input type="checkbox" id="q_tout"> toutes</label>' +
+    qs.map(q => '<label data-q="' + q + '"><input type="checkbox" value="' + q + '"' +
+      (SELQ.has(q) ? " checked" : "") + '> ' +
+      (q === 0 ? "0" : q + "\u2605") + '</label>').join("");
+
+  box.querySelectorAll("input[value]").forEach(i => i.addEventListener("change", () => {
+    if (i.checked) SELQ.add(+i.value); else SELQ.delete(+i.value);
+    if (!SELQ.size) { SELQ.add(+i.value); i.checked = true; }   // jamais aucune
+    marquer(qs); dessine();
+  }));
+  document.getElementById("q_tout").addEventListener("change", e => {
+    SELQ = new Set(e.target.checked ? qs : [qs.includes(0) ? 0 : qs[0]]);
+    box.querySelectorAll("input[value]").forEach(i => i.checked = SELQ.has(+i.value));
+    marquer(qs); dessine();
+  });
+  marquer(qs);
 
   if (VOL_KIND !== k) {
     VOL_KIND = k;
@@ -328,6 +378,16 @@ async function changerRessource() {
                    .filter(r => r.p != null);
   }
   dessine();
+}
+
+function marquer(qs) {
+  document.querySelectorAll("#qual label[data-q]").forEach(l =>
+    l.classList.toggle("on", SELQ.has(+l.dataset.q)));
+  const t = document.getElementById("q_tout");
+  if (t) {
+    t.checked = SELQ.size === qs.length;
+    document.getElementById("l_tout").classList.toggle("on", t.checked);
+  }
 }
 
 /* ---------- dessin ------------------------------------------------- */
@@ -396,153 +456,221 @@ function survol(el, cle, p, lw, texte) {
 
 /* ---------- le rendu ----------------------------------------------- */
 
+function serieQ(k, q) { return HORAIRE.get(k + "|" + q) || []; }
+
+// Fusionne plusieurs qualites en une seule serie : le prix retenu est le
+// MEILLEUR des qualites cochees (c'est celui que verrait un acheteur), les
+// quantites et les volumes s'additionnent.
+function fusion(k, qs, depuis) {
+  if (qs.length === 1) {
+    const p = serieQ(k, qs[0]);
+    return depuis ? p.filter(x => x.h >= depuis) : p.slice();
+  }
+  const m = new Map(), mn = (a, b) => a == null ? b : (b == null ? a : Math.min(a, b));
+  for (const q of qs) for (const p of serieQ(k, q)) {
+    if (depuis && p.h < depuis) continue;
+    let a = m.get(p.h);
+    if (!a) m.set(p.h, a = {h: p.h, o: null, hi: null, lo: null, c: null,
+                            n: 0, qte: 0, prof: null, vendu: 0, retire: 0});
+    a.o = mn(a.o, p.o); a.hi = mn(a.hi, p.hi);
+    a.lo = mn(a.lo, p.lo); a.c = mn(a.c, p.c);
+    a.n += p.n || 0; a.qte += p.qte || 0;
+    if (p.prof != null) a.prof = (a.prof || 0) + p.prof;
+    a.vendu += p.vendu; a.retire += p.retire;
+  }
+  return [...m.values()].sort((a, b) => a.h < b.h ? -1 : 1);
+}
+
 function dessine() {
   const k = document.getElementById("res").value;
-  const q = +document.getElementById("qual").value;
+  const qs = [...SELQ].sort((a, b) => a - b);
   const jours = +document.getElementById("jours").value;
 
-  let pts = HORAIRE.get(k + "|" + q) || [];
+  const toutes = fusion(k, qs, "");
   let depuis = "";
-  if (jours < 999 && pts.length) {
-    const fin = new Date(pts[pts.length - 1].h + ":00:00Z").getTime();
+  if (jours < 9999 && toutes.length) {
+    const fin = new Date(toutes[toutes.length - 1].h + ":00:00Z").getTime();
     depuis = new Date(fin - jours * 864e5).toISOString().slice(0, 13);
-    pts = pts.filter(p => p.h >= depuis);
   }
-  const carnet = ORDRES.filter(o => o.k == k && o.q === q)
+  const pts = depuis ? toutes.filter(p => p.h >= depuis) : toutes;
+  const carnet = ORDRES.filter(o => o.k == k && SELQ.has(o.q))
                        .sort((a, b) => a.p - b.p);
 
-  kpis(pts, carnet);
-  volumeParPrix(q, depuis, jours);
-  courbePrix(pts);
+  kpis(pts, carnet, qs);
+  volumeParPrix(qs, depuis);
+  courbePrix(k, qs, depuis, pts);
   courbeProfondeur(pts);
-  profilHoraire(k, q);
+  profilHoraire(toutes);
   echelleQualite(k);
   tableCarnet(carnet);
   netVente(carnet, pts);
   tableau(pts);
 }
 
-function kpis(pts, carnet) {
+function kpis(pts, carnet, qs) {
   const box = document.getElementById("kpis");
-  const meilleur = carnet.length ? carnet[0].p : null;
   const avecPrix = pts.filter(p => p.c != null);
   const der = avecPrix[avecPrix.length - 1];
+  // le meilleur prix, c'est le moins cher REELLEMENT en vente maintenant
+  const meilleur = carnet.length ? carnet[0].p : null;
+  const base = meilleur ?? (der && der.c);
   const p24 = der ? new Date(der.h + ":00:00Z").getTime() - 24 * 3600e3 : 0;
   const ref = avecPrix.filter(p => new Date(p.h + ":00:00Z").getTime() <= p24).pop();
-  const base = meilleur ?? (der && der.c);
   const var24 = (ref && base) ? (base / ref.c - 1) * 100 : null;
   const prof = carnet.length
     ? carnet.filter(o => o.p <= carnet[0].p * 1.05).reduce((s, o) => s + o.qt, 0)
     : null;
-  const v24 = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24)
-                 .reduce((s, p) => s + p.vendu, 0);
-  const r24 = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24)
-                 .reduce((s, p) => s + p.retire, 0);
+  const recents = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24);
+  const v24 = recents.reduce((s, p) => s + p.vendu, 0);
+  const r24 = recents.reduce((s, p) => s + p.retire, 0);
+  const bas = avecPrix.length ? Math.min(...avecPrix.map(p => p.lo ?? p.c)) : null;
+  const haut = avecPrix.length ? Math.max(...avecPrix.map(p => p.hi ?? p.c)) : null;
 
   box.innerHTML = [
-    ["Meilleur prix", prix(base) + " $", carnet.length ? "carnet " + AGE : "dernier releve"],
+    ["Meilleur prix", prix(base) + " $",
+      carnet.length ? "le moins cher en vente, " + AGE : "dernier releve (carnet vide)"],
     ["Variation 24 h", var24 == null ? "—" :
       '<span class="' + (var24 >= 0 ? "up" : "down") + '">' +
       (var24 >= 0 ? "+" : "") + fmt(var24, 2) + " %</span>",
       ref ? "depuis " + prix(ref.c) + " $" : "pas assez de recul"],
+    ["Haut / bas de la periode", bas == null ? "—" : prix(bas) + " – " + prix(haut),
+      bas > 0 ? "ecart de " + fmt((haut / bas - 1) * 100, 1) + " %" : "sur le meilleur prix"],
     ["Profondeur a -5 %", prof != null ? ent(prof) + " u" : "—",
-      carnet.length + " offres en vente"],
+      carnet.length + " offres sur " + qs.length + " qualite(s)"],
     ["Vendu sur 24 h", v24 ? ent(v24) + " u" : "—",
-      v24 ? "soit " + ent(v24 * (base || 0)) + " $" : "se remplit avec le temps"],
-    ["Retire du marche", r24 ? ent(r24) + " u" : "—",
-      "offres annulees par leurs vendeurs"]
+      r24 ? ent(r24) + " u retirees par leurs vendeurs"
+          : (v24 ? "aucun retrait observe" : "se remplit avec le temps")]
   ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
     b + '</div><div class="n">' + c + '</div></div>').join("");
 }
 
 /* --- LE graphique : le volume echange a chaque prix --- */
-function volumeParPrix(q, depuis, jours) {
+function volumeParPrix(qs, depuis) {
   const el = document.getElementById("c_vol");
-  const lignes = VOLUME.filter(r => r.q === q && (!depuis || r.h >= depuis));
+  const lignes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
   const par = new Map();
   for (const r of lignes) par.set(r.p, (par.get(r.p) || 0) + r.v);
-  const pts = [...par.entries()].map(([p, v]) => ({p, v}))
-                                .sort((a, b) => a.p - b.p);
+  const pts = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
   const total = pts.reduce((s, x) => s + x.v, 0);
 
   document.getElementById("h_vol").textContent = pts.length
-    ? "Combien d'unites sont parties a chaque prix sur la periode : " +
-      ent(total) + " au total. Les baisses de quantite sont des ventes certaines ; " +
-      "les offres disparues ne sont comptees que si elles etaient les moins cheres."
-    : "Aucune vente enregistree sur cette periode pour ce niveau de qualite.";
-
+    ? "Combien d'unites sont parties a chaque prix sur la periode : " + ent(total) +
+      " au total. Les baisses de quantite sont des ventes certaines ; les offres " +
+      "disparues ne sont comptees que si elles etaient les moins cheres."
+    : "Aucune vente enregistree sur cette periode pour les qualites cochees.";
   if (!pts.length) { el.innerHTML = vide("Pas encore de vente observee."); return; }
 
   const lh = 210, lw = W - M.l - M.r;
   const max = Math.max(...pts.map(x => x.v));
   const y = echelle(0, max, lh);
   const bw = lw / pts.length;
-  const large = Math.min(bw - 4, 58);          // pas de blocs enormes a 3 paliers
+  const large = Math.min(bw - 4, 58);
   const dec = (bw - large) / 2;
   const gros = pts.reduce((a, b) => b.v > a.v ? b : a);
+  const iGros = pts.indexOf(gros);
 
-  const barres = pts.map((d, i) => {
-    const y1 = y(d.v), y0 = y(0);
-    return '<rect x="' + (i * bw + dec).toFixed(1) + '" y="' + y1.toFixed(1) +
-      '" width="' + Math.max(large, 1).toFixed(1) + '" height="' +
-      Math.max(y0 - y1, 1).toFixed(1) + '" rx="3" fill="var(--s1)"' +
-      (d === gros ? ' opacity="1"' : ' opacity=".82"') + '/>';
-  }).join("");
-
-  const n = Math.min(9, pts.length);
-  const ax = [];
+  const n = Math.min(9, pts.length), ax = [];
   for (let j = 0; j < n; j++) {
     const i = Math.round(j / (n - 1 || 1) * (pts.length - 1));
     ax.push('<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' +
       (lh + 17) + '">' + prix(pts[i].p) + '</text>');
   }
-  const iGros = pts.indexOf(gros);
-  const etiq = '<text class="lbl m" text-anchor="middle" x="' +
-    (iGros * bw + bw / 2).toFixed(1) + '" y="' + (y(gros.v) - 8).toFixed(1) +
-    '">' + ent(gros.v) + " u a " + prix(gros.p) + " $</text>";
 
   el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, max, 4), y, 0, lw) + barres + etiq +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
-    '" y2="' + y(0).toFixed(1) + '"/>' + ax.join("") +
+    grille(ticks(0, max, 4), y, 0, lw) +
+    pts.map((d, i) => '<rect x="' + (i * bw + dec).toFixed(1) + '" y="' +
+      y(d.v).toFixed(1) + '" width="' + Math.max(large, 1).toFixed(1) + '" height="' +
+      Math.max(y(0) - y(d.v), 1).toFixed(1) + '" rx="3" fill="var(--s1)" opacity="' +
+      (d === gros ? "1" : ".82") + '"/>').join("") +
+    '<text class="lbl" text-anchor="middle" x="' + (iGros * bw + bw / 2).toFixed(1) +
+    '" y="' + (y(gros.v) - 8).toFixed(1) + '">' + ent(gros.v) + " u a " +
+    prix(gros.p) + ' $</text>' +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' +
+    y(0).toFixed(1) + '"/>' + ax.join("") +
     '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">prix de vente ($)</text>' +
     '<rect x="0" y="0" width="' + lw + '" height="' + lh +
     '" fill="transparent" id="hit_vol"/></g>', lh + M.t + M.b + 16);
 
-  survol(el, "vol", pts, lw, i =>
-    "<b>" + ent(pts[i].v) + " u</b> echangees a " + prix(pts[i].p) + " $<br>" +
-    '<span class="dim">' + fmt(pts[i].v / total * 100, 1) + " % du volume</span>");
+  survol(el, "vol", pts, lw, i => "<b>" + ent(pts[i].v) + " u</b> echangees a " +
+    prix(pts[i].p) + " $<br><span class=\"dim\">" + fmt(pts[i].v / total * 100, 1) +
+    " % du volume</span>");
 }
 
-function courbePrix(pts) {
+/* --- prix : une courbe si une seule qualite, une par qualite sinon --- */
+function courbePrix(k, qs, depuis, fus) {
   const el = document.getElementById("c_prix");
-  const p = pts.filter(x => x.c != null);
+  const p = fus.filter(x => x.c != null);
   if (p.length < 2) { el.innerHTML = vide("Pas encore assez de releves."); return; }
+
   const lw = W - M.l - M.r, lh = H - M.t - M.b;
-  const min = Math.min(...p.map(x => x.lo ?? x.c)), max = Math.max(...p.map(x => x.hi ?? x.c));
+  const multi = qs.length > 1;
+  document.getElementById("h_prix").textContent = multi
+    ? "Une courbe par niveau de qualite : le meilleur prix en vente, heure par heure."
+    : "Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le " +
+      "plus bas de l'heure.";
+  const gardees = qs.slice(0, 8);
+  const axeH = p.map(x => x.h);
+  const rang = new Map(axeH.map((h, i) => [h, i]));
+
+  const series = multi ? gardees.map((q, i) => {
+    const tab = new Array(axeH.length).fill(null);
+    for (const x of serieQ(k, q)) {
+      if (x.c == null || !rang.has(x.h)) continue;
+      tab[rang.get(x.h)] = x.c;
+    }
+    return {q, i, tab, n: tab.filter(v => v != null).length};
+  }).filter(s => s.n > 1) : [];
+
+  const vals = multi ? series.flatMap(s => s.tab.filter(v => v != null))
+                     : p.flatMap(x => [x.hi ?? x.c, x.lo ?? x.c]);
+  const min = Math.min(...vals), max = Math.max(...vals);
   const y = echelle(min, max, lh), x = i => i / (p.length - 1) * lw;
-  const bande = '<polygon points="' +
-    p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1))
-     .concat(p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse())
-     .join(" ") + '" fill="var(--band)"/>';
-  const trait = '<polyline points="' + p.map((d, i) =>
-    x(i).toFixed(1) + "," + y(d.c).toFixed(1)).join(" ") +
-    '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>';
-  const der = p[p.length - 1];
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 4), y, null, lw) + bande + trait +
-    '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(der.c).toFixed(1) +
-    '" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>' +
-    '<text class="lbl" x="' + (x(p.length - 1) + 9).toFixed(1) + '" y="' +
-    (y(der.c) + 4).toFixed(1) + '">' + prix(der.c) + ' $</text>' +
+
+  let corps = "";
+  if (multi) {
+    corps = series.map(s => {
+      const bouts = [];
+      let cour = [];
+      s.tab.forEach((v, i) => {
+        if (v == null) { if (cour.length > 1) bouts.push(cour); cour = []; }
+        else cour.push(x(i).toFixed(1) + "," + y(v).toFixed(1));
+      });
+      if (cour.length > 1) bouts.push(cour);
+      return bouts.map(b => '<polyline points="' + b.join(" ") +
+        '" fill="none" stroke="' + COUL(s.i) +
+        '" stroke-width="2" stroke-linejoin="round"/>').join("");
+    }).join("");
+  } else {
+    corps = '<polygon points="' +
+      p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1))
+       .concat(p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse())
+       .join(" ") + '" fill="var(--band)"/>' +
+      '<polyline points="' + p.map((d, i) => x(i).toFixed(1) + "," + y(d.c).toFixed(1))
+        .join(" ") + '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>' +
+      '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(p[p.length - 1].c).toFixed(1) +
+      '" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>' +
+      '<text class="lbl" x="' + (x(p.length - 1) + 9).toFixed(1) + '" y="' +
+      (y(p[p.length - 1].c) + 4).toFixed(1) + '">' + prix(p[p.length - 1].c) + ' $</text>';
+  }
+
+  const legende = multi ? '<div class="leg">' + series.map(s =>
+    '<span><i style="background:' + COUL(s.i) + '"></i>' +
+    (s.q === 0 ? "0 etoile" : s.q + " \u2605") + '</span>').join("") +
+    (qs.length > 8 ? '<span class="dim">(les ' + (qs.length - 8) +
+      ' qualites les plus hautes ne sont pas tracees)</span>' : "") + '</div>' : "";
+
+  el.innerHTML = legende + svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(min, max, 4), y, null, lw) + corps +
     '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
     axeTemps(p, x, lh) +
     '<line id="cr_prix" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
     '<rect x="0" y="0" width="' + lw + '" height="' + lh +
     '" fill="transparent" id="hit_prix"/></g>');
+
   survol(el, "prix", p, lw, i => p[i].h.replace("T", " a ") + " h<br><b>" +
-    prix(p[i].c) + " $</b>" + (p[i].hi != null ? '<br><span class="dim">haut ' +
-    prix(p[i].hi) + " · bas " + prix(p[i].lo) + "</span>" : "") +
+    prix(p[i].c) + " $</b>" +
+    (p[i].hi != null && !multi ? '<br><span class="dim">haut ' + prix(p[i].hi) +
+      " · bas " + prix(p[i].lo) + "</span>" : "") +
     (p[i].vendu ? "<br>" + ent(p[i].vendu) + " u vendues" : ""));
 }
 
@@ -569,9 +697,8 @@ function courbeProfondeur(pts) {
     ent(p[i].prof) + " u</b> a moins de 5 %");
 }
 
-function profilHoraire(k, q) {
+function profilHoraire(tous) {
   const el = document.getElementById("c_heure");
-  const tous = HORAIRE.get(k + "|" + q) || [];
   const parJour = new Map();
   for (const p of tous) {
     if (p.c == null) continue;
@@ -582,18 +709,20 @@ function profilHoraire(k, q) {
   const acc = Array.from({length: 24}, () => []);
   let nJours = 0;
   for (const [, l] of parJour) {
-    if (l.length < 6) continue;
+    if (l.length < 6) continue;          // journee trop incomplete
     nJours++;
     const moy = l.reduce((s, p) => s + p.c, 0) / l.length;
     for (const p of l) acc[+p.h.slice(11, 13)].push((p.c / moy - 1) * 100);
   }
   const med = acc.map(a => a.length ? a.slice().sort((x, y) => x - y)[a.length >> 1] : null);
   const dispo = med.filter(v => v != null);
+
   document.getElementById("h_heure").textContent = nJours < 3
     ? "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC). " +
       "Base sur " + nJours + " journee(s) : trop peu pour en tirer une regle."
     : "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC), " +
-      "sur " + nJours + " journees. Au-dessus de zero : le prix y est habituellement plus haut.";
+      "sur " + nJours + " journees completes. Au-dessus de zero : le prix y est " +
+      "habituellement plus haut. Calcule sur tout l'historique, pas sur la periode choisie.";
   if (dispo.length < 4) { el.innerHTML = vide("Pas encore assez d'heures couvertes."); return; }
 
   const lh = 190, lw = W - M.l - M.r;
@@ -654,15 +783,15 @@ function tableCarnet(carnet) {
       ". La colonne variation montre ce qui est parti depuis le passage precedent."
     : "Aucune offre en vente pour ce niveau de qualite.";
   const l = carnet.slice(0, 15);
-  t.innerHTML = '<tr><th>Prix</th><th>Quantite</th><th>Variation</th>' +
-    '<th>Vendeur</th><th>En ligne depuis</th></tr>' +
+  t.innerHTML = '<tr><th>Prix</th><th>Qualite</th><th>Quantite</th><th>Variation</th>' +
+    '<th>Vendeur</th><th>En vente depuis</th></tr>' +
     (l.length ? l.map(o => {
-      const heures = (Date.now() - new Date(o.vu).getTime()) / 3600e3;
-      return '<tr><td>' + prix(o.p) + ' $</td><td>' + ent(o.qt) + '</td><td>' +
+      return '<tr><td>' + prix(o.p) + ' $</td><td>' +
+        (o.q === 0 ? "0" : o.q + "\u2605") + '</td><td>' + ent(o.qt) + '</td><td>' +
         (o.d ? '<span class="down">' + ent(o.d) + "</span>" : '<span class="dim">—</span>') +
         '</td><td class="dim">' + o.sid + '</td><td>' +
-        (isFinite(heures) ? fmt(heures, 1) + " h" : "—") + '</td></tr>';
-    }).join("") : '<tr><td colspan="5" class="dim">Rien a afficher.</td></tr>');
+        duree(Date.now() - new Date(o.vu).getTime()) + '</td></tr>';
+    }).join("") : '<tr><td colspan="6" class="dim">Rien a afficher.</td></tr>');
 }
 
 function netVente(carnet, pts) {
