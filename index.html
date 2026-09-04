@@ -83,7 +83,7 @@ tr:last-child td{border-bottom:0}
 .dim{color:var(--muted)}
 footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 </style><style>
-.frais{font-size:11px;color:var(--muted);margin-left:8px}
+.frais{font-size:11px;color:var(--muted);margin-left:8px;white-space:nowrap}
 .pastille{display:inline-block;width:7px;height:7px;border-radius:50%;
   background:var(--good);margin-right:5px;vertical-align:middle}
 .moi{color:var(--s2);font-weight:600}
@@ -126,6 +126,22 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 <div class="kpis" id="kpis"></div>
 
 <div class="card">
+  <h2>A quel prix vendre</h2>
+  <p class="h" id="h_dem">La courbe de demande : combien le marche absorbe par jour selon le prix ou tu te places.</p>
+  <div class="calc">
+    <div><label for="i_prod">Ta production (u/jour)</label><input id="i_prod" type="number" step="500" value="34251"></div>
+    <div><label for="i_frais">Frais de bourse (%)</label><input id="i_frais" type="number" step="0.1" value="4"></div>
+    <div><label for="i_tr">Transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"><div class="frais" id="tr_marche" style="margin:3px 0 0"></div></div>
+    <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
+  </div>
+  <div class="note" id="n_dem"></div>
+  <div id="c_dem"></div><div class="tip" id="t_dem"></div>
+  <h2 style="margin-top:18px">Ce que ca te rapporte par jour</h2>
+  <p class="h">Le volume absorbe multiplie par ce qu'il te reste apres frais et transport, en contrat.</p>
+  <div id="c_rev"></div><div class="tip" id="t_rev"></div>
+</div>
+
+<div class="card">
   <h2>Volume echange, prix par prix</h2>
   <p class="h" id="h_vol">Combien d'unites sont parties a chaque prix sur la periode. C'est le prix ou le marche accepte vraiment d'acheter.</p>
   <div id="c_vol"></div><div class="tip" id="t_vol"></div>
@@ -163,12 +179,9 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 
 <div class="card">
   <h2>Ce que la vente te rapporte vraiment</h2>
-  <p class="h">Frais de bourse et transport deduits. Modifie les valeurs si elles changent.</p>
+  <p class="h">Frais de bourse et transport deduits, avec les reglages saisis plus haut.</p>
   <div class="calc">
-    <div><label for="i_frais">Frais de bourse (%)</label><input id="i_frais" type="number" step="0.1" value="4"></div>
-    <div><label for="i_tr">Prix du transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"></div>
-    <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
-    <div><label for="i_qte">Quantite</label><input id="i_qte" type="number" step="100" value="25000"></div>
+    <div><label for="i_qte">Quantite a vendre</label><input id="i_qte" type="number" step="100" value="25000"></div>
   </div>
   <div class="scroll"><table id="t_net"></table></div>
   <div class="note" id="n_net"></div>
@@ -249,6 +262,8 @@ let HORAIRE = new Map();      // "kind|quality" -> lignes triees par heure
 let VOLUME = [];              // volumes par prix de la ressource affichee
 let VOL_KIND = null;
 let SELQ = new Set();         // les qualites cochees
+let TR_AUTO = true;           // le transport suit le marche tant qu'on n'y touche pas
+const KIND_TRANSPORT = 13;
 let AGE = "";                 // fraicheur du carnet
 const COUL = i => "var(--s" + ((i % 8) + 1) + ")";
 
@@ -327,9 +342,10 @@ async function demarrer() {
   document.getElementById("foot").textContent =
     "Le carnet est reecrit toutes les 5 minutes. L'historique est fige heure par heure.";
 
-  ["res", "qual", "jours", "i_frais", "i_tr", "i_tru", "i_qte"]
+  ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod"]
     .forEach(id => document.getElementById(id)
       .addEventListener("change", id === "res" ? changerRessource : dessine));
+  document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
   changerRessource();
 }
 
@@ -481,6 +497,19 @@ function fusion(k, qs, depuis) {
   return [...m.values()].sort((a, b) => a.h < b.h ? -1 : 1);
 }
 
+// Le transport est un produit du marche comme un autre : on prend son prix
+// en direct, sauf si tu as saisi le tien.
+function majTransport() {
+  const off = ORDRES.filter(o => o.k === KIND_TRANSPORT && o.q === 0);
+  const m = off.length ? Math.min(...off.map(o => o.p)) : null;
+  const ind = document.getElementById("tr_marche");
+  const champ = document.getElementById("i_tr");
+  if (m == null) { ind.textContent = ""; return; }
+  ind.textContent = TR_AUTO ? "marche : " + prix(m) + " $"
+                            : "marche : " + prix(m) + " $ · ton prix retenu";
+  if (TR_AUTO) champ.value = m;
+}
+
 function dessine() {
   const k = document.getElementById("res").value;
   const qs = [...SELQ].sort((a, b) => a - b);
@@ -496,7 +525,9 @@ function dessine() {
   const carnet = ORDRES.filter(o => o.k == k && SELQ.has(o.q))
                        .sort((a, b) => a.p - b.p);
 
+  majTransport();
   kpis(pts, carnet, qs);
+  demande(qs, depuis, carnet);
   volumeParPrix(qs, depuis);
   courbePrix(k, qs, depuis, pts);
   courbeProfondeur(pts);
@@ -542,6 +573,131 @@ function kpis(pts, carnet, qs) {
           : (v24 ? "aucun retrait observe" : "se remplit avec le temps")]
   ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
     b + '</div><div class="n">' + c + '</div></div>').join("");
+}
+
+/* --- LA courbe de demande : combien part par jour selon le prix ---------
+   Un acheteur prend toujours le moins cher. Donc tout ce qui s'est echange a
+   6,60 $ ou PLUS CHER, on l'aurait capte en se placant a 6,60. On cumule
+   donc du prix le plus haut vers le plus bas. --------------------------- */
+function demande(qs, depuis, carnet) {
+  const elD = document.getElementById("c_dem"), elR = document.getElementById("c_rev");
+  const lignes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
+  const heures = new Set(lignes.map(r => r.h));
+  const jours = Math.max(heures.size / 24, 1 / 24);
+
+  const par = new Map();
+  for (const r of lignes) par.set(r.p, (par.get(r.p) || 0) + r.v);
+  const paliers = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
+
+  if (paliers.length < 2) {
+    document.getElementById("h_dem").textContent =
+      "La courbe de demande : combien le marche absorbe par jour selon le prix. " +
+      "Il faut au moins quelques ventes observees pour la tracer.";
+    document.getElementById("n_dem").textContent =
+      "Pas encore assez de ventes enregistrees. Reviens quand la collecte aura " +
+      "tourne une journee complete.";
+    elD.innerHTML = ""; elR.innerHTML = ""; return;
+  }
+
+  // cumul depuis le prix le plus haut
+  const pts = [];
+  let cum = 0;
+  for (let i = paliers.length - 1; i >= 0; i--) {
+    cum += paliers[i].v;
+    pts.unshift({p: paliers[i].p, q: cum / jours});
+  }
+
+  const frais = +document.getElementById("i_frais").value / 100;
+  const ptr = +document.getElementById("i_tr").value;
+  const tru = +document.getElementById("i_tru").value;
+  const prod = +document.getElementById("i_prod").value || 0;
+  const netC = p => p - ptr * tru * 0.5;          // contrat : le canal principal
+
+  // le prix le plus haut auquel toute la production part
+  const tient = pts.filter(x => x.q >= prod);
+  const prixTout = tient.length ? tient[tient.length - 1].p : null;
+  // le prix qui rapporte le plus par jour
+  const rev = pts.map(x => ({p: x.p, r: Math.min(x.q, prod || x.q) * netC(x.p)}));
+  const best = rev.reduce((a, b) => b.r > a.r ? b : a);
+  const meilleur = carnet.length ? carnet[0].p : null;
+
+  document.getElementById("h_dem").textContent =
+    "Combien le marche a absorbe par jour, selon le prix ou tu te places. " +
+    "Lecture : a 6,60 $ figure tout ce qui s'est echange a 6,60 et au-dessus, " +
+    "puisqu'un acheteur prend toujours le moins cher. Base sur " +
+    (heures.size < 24 ? heures.size + " heures observees" : fmt(jours, 1) + " jours") + ".";
+
+  document.getElementById("n_dem").innerHTML =
+    (prixTout
+      ? "Le prix le plus haut auquel <b>toute ta production part</b> : <b>" +
+        prix(prixTout) + " $</b>."
+      : "<b>Le marche n'absorbe pas " + ent(prod) + " u/jour</b> aux prix observes : " +
+        "au plus bas prix releve il n'en prend que " + ent(pts[0].q) + " u/jour.") +
+    " Le prix qui <b>rapporte le plus</b> est <b>" + prix(best.p) + " $</b>, pour " +
+    ent(best.r) + " $ par jour en contrat." +
+    (meilleur ? " Le marche est actuellement a " + prix(meilleur) + " $." : "") +
+    (heures.size < 24 ? " <span class=\"dim\">Attention : moins d'une journee de " +
+      "recul, ces chiffres bougeront beaucoup.</span>" : "");
+
+  courbeXY(elD, "dem", pts, x => x.p, x => x.q, prix, ent,
+    "u/jour absorbees", prod || null, "ta production",
+    i => "A <b>" + prix(pts[i].p) + " $</b><br>le marche prend <b>" +
+         ent(pts[i].q) + " u/jour</b>");
+  courbeXY(elR, "rev", rev, x => x.p, x => x.r, prix, ent,
+    "$/jour nets", null, null,
+    i => "A <b>" + prix(rev[i].p) + " $</b><br><b>" + ent(rev[i].r) +
+         " $/jour</b> nets" + (rev[i] === best ? " — le maximum" : ""), best);
+}
+
+// Une courbe sur une echelle de prix reelle (pas un simple rang).
+function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, info, marque) {
+  const lh = 200, lw = W - M.l - M.r;
+  const xs = pts.map(fx), ys = pts.map(fy);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const ymax = Math.max(...ys, seuil || 0);
+  const y = echelle(0, ymax, lh);
+  const X = v => x1 === x0 ? lw / 2 : (v - x0) / (x1 - x0) * lw;
+
+  const trait = '<polyline points="' + pts.map(d =>
+    X(fx(d)).toFixed(1) + "," + y(fy(d)).toFixed(1)).join(" ") +
+    '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>';
+  const aire = '<polygon points="' + X(x0).toFixed(1) + "," + y(0).toFixed(1) + " " +
+    pts.map(d => X(fx(d)).toFixed(1) + "," + y(fy(d)).toFixed(1)).join(" ") + " " +
+    X(x1).toFixed(1) + "," + y(0).toFixed(1) + '" fill="var(--band)"/>';
+
+  let deco = "";
+  if (seuil) {
+    deco += '<line x1="0" y1="' + y(seuil).toFixed(1) + '" x2="' + lw + '" y2="' +
+      y(seuil).toFixed(1) + '" stroke="var(--s2)" stroke-width="2" ' +
+      'stroke-dasharray="0"/><text class="lbl" x="4" y="' +
+      (y(seuil) - 7).toFixed(1) + '" fill="var(--s2)">' + nomSeuil + " : " +
+      fmtY(seuil) + '</text>';
+  }
+  if (marque) {
+    deco += '<line x1="' + X(fx(marque)).toFixed(1) + '" y1="0" x2="' +
+      X(fx(marque)).toFixed(1) + '" y2="' + lh + '" stroke="var(--s2)" stroke-width="2"/>' +
+      '<text class="lbl" text-anchor="middle" x="' + X(fx(marque)).toFixed(1) +
+      '" y="-2" fill="var(--s2)">' + fmtX(fx(marque)) + " $</text>";
+  }
+
+  const n = Math.min(8, pts.length), ax = [];
+  for (let j = 0; j < n; j++) {
+    const v = x0 + j / (n - 1 || 1) * (x1 - x0);
+    ax.push('<text class="tk m" x="' + X(v).toFixed(1) + '" y="' + (lh + 17) + '">' +
+      fmtX(v) + "</text>");
+  }
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(0, ymax, 4), y, 0, lw) + aire + trait + deco +
+    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
+    ax.join("") +
+    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">ton prix de vente ($) — ' +
+    titreY + '</text>' +
+    '<line id="cr_' + cle + '" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
+    '" fill="transparent" id="hit_' + cle + '"/></g>', lh + M.t + M.b + 18);
+
+  survol(el, cle, pts, lw, info);
 }
 
 /* --- LE graphique : le volume echange a chaque prix --- */
