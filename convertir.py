@@ -20,7 +20,7 @@ Ce qui ne l'est pas :
 
 Ensuite les anciens dossiers sont effaces.
 """
-import csv, glob, gzip, os, shutil, sys
+import csv, glob, gzip, io, os, shutil, sys
 from collections import defaultdict
 
 EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
@@ -50,6 +50,27 @@ def lignes(fh):
             yield dict(zip(entete, l))
         elif len(l) == n + 1 and "quality" not in entete:
             yield dict(zip(avec_q, l))
+
+
+def texte_gz(chemin):
+    """Lit un fichier compresse meme s'il est abime.
+
+    Quand le collecteur est arrete en pleine ecriture, le fichier ne se
+    termine pas proprement et Python refuse de le lire jusqu'au bout. On
+    garde alors tout ce qui est lisible et on s'arrete la, plutot que de
+    perdre le fichier entier."""
+    bouts = []
+    try:
+        with gzip.open(chemin, "rt", errors="replace") as fh:
+            while True:
+                b = fh.read(1 << 20)
+                if not b:
+                    break
+                bouts.append(b)
+    except Exception:
+        print(f"  {chemin} : fin de fichier abimee, on garde ce qui est lisible")
+    t = "".join(bouts)
+    return t[:t.rfind("\n") + 1] if "\n" in t else ""
 
 
 def nb(x):
@@ -85,7 +106,7 @@ def main():
                              nb(r.get("qty_within_5pct")))
 
     for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
-        with gzip.open(f, "rt") as fh:
+        with io.StringIO(texte_gz(f)) as fh:
             for r in lignes(fh):
                 if r.get("evt") != "C" or r.get("reprise") == "1":
                     continue
@@ -121,7 +142,8 @@ def main():
             w = csv.writer(fh); w.writerow(EN_VOLUME); w.writerows(l)
     print(f"  data/volume : {len(par_mois_v)} fichiers par ressource")
 
-    for d in ("data/ticker", "data/book", "data/tape", "data/hourly"):
+    for d in ("data/ticker", "data/book", "data/tape", "data/hourly",
+              "data/flow"):
         if os.path.isdir(d):
             shutil.rmtree(d)
             print(f"  {d} efface")
