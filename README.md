@@ -1,59 +1,55 @@
-# simco-market — collecteur de prix Sim Companies
+# simco-market
 
-Enregistre l'historique complet du marche (realm 0), que le jeu n'expose nulle part.
-Tourne tout seul sur GitHub Actions, gratuitement, sans serveur ni ordinateur allume.
+Releve en continu le marche de Sim Companies (royaume 0) et publie un
+tableau de bord.
 
-## Ce qui est collecte
+**Tableau de bord :** https://cherlo30.github.io/simco-market/
 
-| Fichier | Frequence | Contenu |
-|---|---|---|
-| `data/ticker/AAAA-MM-JJ.csv` | 10 min | prix des ~140 ressources + tendance |
-| `data/book/AAAA-MM-JJ.csv` | 1 h | meilleure offre, profondeur, age median des ordres |
+## Comment ca marche
 
-`median_age_h` est la mesure directe de la vitesse d'ecoulement : l'age median
-des 20 offres les moins cheres. En dessous de 2 h le produit part vite, au-dela
-de 20 h il stagne.
+`collect.py` tourne en boucle sur GitHub Actions. Il interroge les
+~143 ressources une par une (un tour complet dure ~3 min), compare ce
+qu'il voit au carnet enregistre, en deduit ce qui s'est vendu, et
+reecrit le carnet.
 
-## Installation — 5 minutes
+**Le programme ne se souvient de rien : sa memoire est le fichier.**
+Au demarrage il lit la branche `live`. Quand GitHub coupe la course au
+bout de 5 h 30, le programme suivant reprend exactement ou l'autre
+s'est arrete. Aucun trou.
 
-1. Sur github.com : **New repository**, nom `simco-market`, visibilite **Public**
-   (les depots publics ont des minutes d'execution illimitees), coche
-   *Add a README file*, puis **Create repository**.
+## Les fichiers
 
-2. **Add file > Upload files**. Glisse tout le contenu de ce dossier
-   (`collect_ticker.py`, `collect_books.py`, `analyse.py`, `README.md`,
-   les dossiers `.github` et `data`). Ecris un message et **Commit changes**.
+Branche `live` — reecrite par-dessus elle-meme a chaque envoi
+(5 min). GitHub n'en garde qu'un exemplaire, aucun historique :
 
-   > Si le dossier `.github` ne monte pas par glisser-deposer, utilise
-   > **Add file > Create new file**, tape `.github/workflows/ticker.yml`
-   > comme nom, colle le contenu, valide. Recommence pour `books.yml`.
+| fichier | contenu |
+|---|---|
+| `ordres.csv` | toutes les offres en vente, avec leur variation |
+| `heure_horaire.csv` | l'heure en cours, en construction |
+| `heure_volume.csv` | les volumes par prix de l'heure en cours |
 
-3. Onglet **Actions**. GitHub demande une confirmation la premiere fois :
-   **I understand my workflows, go ahead and enable them**.
+Branche `main` — ne recoit qu'une heure **terminee**, ajoutee une fois
+pour toutes :
 
-4. Clique le workflow **ticker** > **Run workflow** pour verifier tout de suite.
-   Un premier fichier doit apparaitre dans `data/ticker/`.
+| fichier | contenu |
+|---|---|
+| `data/horaire/AAAA-MM.csv` | par heure et par ressource : ouverture, haut, bas, cloture, profondeur, vendu, retire |
+| `data/volume/<ressource>/AAAA-MM.csv` | volume echange a chaque palier de prix |
 
-C'est fini. La collecte tourne ensuite toute seule.
+Environ 300 Ko par jour.
 
-## Analyse
+## Vendu ou retire
 
-Telecharge le depot (**Code > Download ZIP**), puis :
+Le jeu ne permet pas de reduire une offre en vente : **toute baisse
+partielle est une vente.**
 
-```
-python3 analyse.py 146          # citrouille
-python3 analyse.py 146 2 66 13  # citrouille, eau, semences, transport
-```
+Seule la disparition complete d'une offre est ambigue. On tranche par
+le prix : si l'offre disparue etait au meilleur prix ou en dessous,
+personne n'aurait achete ailleurs, c'est une **vente** ; s'il restait
+moins cher sur le marche, c'est un **retrait** de son vendeur.
 
-Sortie : profil horaire en UTC (a quelle heure ca monte, a quelle heure ca creuse),
-amplitude par jour, et le prix fixe conseille pour un contrat, avec son
-equivalent en vente a la bourse.
+## La chaine
 
-## Notes
-
-- Les deux endpoints utilises sont publics, aucune authentification.
-- Les taches planifiees de GitHub peuvent glisser de 5 a 20 minutes en periode
-  chargee : l'horodatage inscrit dans le CSV est l'heure reelle du releve, pas
-  l'heure theorique. Rien a corriger.
-- Le balayage des carnets dure ~3 minutes (140 requetes espacees de 0,8 s).
-- Pour suivre un autre realm, change `REALM` en haut des deux scripts.
+`loop.yml` collecte 5 h 30, puis se relance lui-meme via le secret
+`PAT` (le jeton `GITHUB_TOKEN` n'a pas le droit de declencher un
+workflow). Un `cron` toutes les 3 h sert de filet si la chaine casse.
