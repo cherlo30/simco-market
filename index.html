@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marche Sim Companies</title>
+<style>
+:root{
+  color-scheme: light;
+  --plane:#f9f9f7; --surface:#fcfcfb;
+  --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
+  --band:rgba(42,120,214,.13);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --plane:#0d0d0d; --surface:#1a1a19;
+    --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
+    --band:rgba(57,135,229,.16);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --plane:#0d0d0d; --surface:#1a1a19;
+  --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --band:rgba(57,135,229,.16);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--plane);color:var(--ink);
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;}
+.wrap{max-width:1100px;margin:0 auto;padding:24px 18px 64px}
+h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
+.sub{color:var(--ink2);font-size:13px;margin:0 0 20px}
+.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:20px}
+label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin-bottom:4px}
+select,input{font:inherit;background:var(--surface);color:var(--ink);
+  border:1px solid var(--ring);border-radius:8px;padding:7px 9px;min-width:0}
+select{min-width:190px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:22px}
+.kpi{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px 15px}
+.kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.kpi .v{font-size:24px;margin-top:4px;letter-spacing:-.02em}
+.kpi .n{font-size:12px;color:var(--ink2);margin-top:2px}
+.up{color:var(--good)} .down{color:var(--bad)}
+.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
+  padding:16px 16px 8px;margin-bottom:18px;position:relative}
+.card h2{font-size:14px;margin:0 0 2px;font-weight:600}
+.card p.h{font-size:12px;color:var(--ink2);margin:0 0 12px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.gl{stroke:var(--grid);stroke-width:1}
+.ax{stroke:var(--axis);stroke-width:1}
+.tk{fill:var(--muted);font-size:11px}
+.tk.r{text-anchor:end} .tk.m{text-anchor:middle}
+.lbl{fill:var(--ink);font-size:12px}
+.tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
+  background:var(--surface);border:1px solid var(--ring);border-radius:8px;
+  padding:7px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.14);
+  white-space:nowrap;z-index:5}
+.tip b{font-variant-numeric:tabular-nums}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
+th{text-align:right;font-weight:500;color:var(--muted);font-size:11px;
+  text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--grid)}
+th:first-child,td:first-child{text-align:left}
+td{padding:6px 8px;border-bottom:1px solid var(--grid)}
+tr:last-child td{border-bottom:0}
+.scroll{overflow-x:auto;margin:0 -16px;padding:0 16px}
+.note{font-size:12px;color:var(--ink2);margin:10px 0 12px;padding:10px 12px;
+  background:var(--plane);border-radius:8px;border:1px solid var(--ring)}
+.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
+.err{color:var(--bad)}
+.dim{color:var(--muted)}
+footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Marche Sim Companies</h1>
+<p class="sub" id="sub">Chargement des donnees...</p>
+
+<div class="bar">
+  <div><label for="res">Ressource</label>
+    <select id="res"></select></div>
+  <div><label for="qual">Qualite</label>
+    <select id="qual"></select></div>
+  <div><label for="jours">Periode</label>
+    <select id="jours">
+      <option value="2">48 heures</option>
+      <option value="7" selected>7 jours</option>
+      <option value="30">30 jours</option>
+      <option value="999">Tout</option>
+    </select></div>
+</div>
+
+<div class="kpis" id="kpis"></div>
+
+<div class="card">
+  <h2>Prix heure par heure</h2>
+  <p class="h">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
+  <div id="c_prix"></div><div class="tip" id="t_prix"></div>
+</div>
+
+<div class="card">
+  <h2>Profondeur du carnet a moins de 5 % du meilleur prix</h2>
+  <p class="h">Combien d'unites tu peux ecouler sans faire chuter le prix de plus de 5 %.</p>
+  <div id="c_prof"></div><div class="tip" id="t_prof"></div>
+</div>
+
+<div class="card">
+  <h2>A quelle heure vendre</h2>
+  <p class="h" id="h_prof">Ecart moyen du prix par rapport a la moyenne du jour, heure par heure (UTC).</p>
+  <div id="c_heure"></div><div class="tip" id="t_heure"></div>
+</div>
+
+<div class="card">
+  <h2>Prix selon le nombre d'etoiles</h2>
+  <p class="h">Dernier prix releve pour chaque niveau de qualite.</p>
+  <div id="c_qual"></div><div class="tip" id="t_qual"></div>
+</div>
+
+<div class="card">
+  <h2>Ce que la vente te rapporte vraiment</h2>
+  <p class="h">Frais de bourse et transport deduits. Modifie les valeurs si elles changent.</p>
+  <div class="calc">
+    <div><label for="i_frais">Frais de bourse (%)</label><input id="i_frais" type="number" step="0.1" value="4"></div>
+    <div><label for="i_tr">Prix du transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"></div>
+    <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
+    <div><label for="i_qte">Quantite</label><input id="i_qte" type="number" step="100" value="25000"></div>
+  </div>
+  <div class="scroll"><table id="t_net"></table></div>
+  <div class="note" id="n_net"></div>
+</div>
+
+<div class="card">
+  <h2>Les 20 dernieres heures en detail</h2>
+  <div class="scroll"><table id="t_tab"></table></div>
+</div>
+
+<footer id="foot"></footer>
+</div>
+<script>
+const NOMS = {"1": "Electricite", "2": "Eau", "3": "Pommes", "4": "Oranges", "5": "Raisin", "6": "Cereales", "7": "Steak", "8": "Saucisses", "9": "Oeufs", "10": "Petrole brut", "11": "Essence", "12": "Diesel", "13": "Transport", "14": "Mineraux", "15": "Bauxite", "16": "Silicium", "17": "Produits chimiques", "18": "Aluminium", "19": "Plastique", "20": "Processeurs", "21": "Composants electroniques", "22": "Batteries", "23": "Ecrans", "24": "Smartphones", "25": "Tablettes", "26": "Ordinateurs portables", "27": "Moniteurs", "28": "Televiseurs", "29": "Recherche vegetale", "30": "Recherche energie", "31": "Recherche miniere", "32": "Recherche electronique", "33": "Recherche elevage", "34": "Recherche chimique", "35": "Logiciel", "40": "Coton", "41": "Tissu", "42": "Minerai de fer", "43": "Acier", "44": "Sable", "45": "Verre", "46": "Cuir", "47": "Ordinateur de bord", "48": "Moteur electrique", "49": "Interieur de luxe", "50": "Interieur de voiture", "51": "Carrosserie", "52": "Moteur thermique", "53": "Voiture electrique economique", "54": "Voiture electrique de luxe", "55": "Voiture economique", "56": "Voiture de luxe", "57": "Camion", "58": "Recherche automobile", "59": "Recherche mode", "60": "Sous-vetements", "61": "Gants", "62": "Robe", "63": "Chaussures Simmi", "64": "Sacs a main", "65": "Baskets", "66": "Semences", "67": "Papillotes de Noel", "68": "Minerai d'or", "69": "Lingots d'or", "70": "Montre en or", "71": "Collier", "72": "Canne a sucre", "73": "Ethanol", "74": "Methane", "75": "Fibre de carbone", "76": "Composite carbone", "77": "Fuselage", "78": "Aile", "79": "Composants haut de gamme", "80": "Calculateur de vol", "81": "Cockpit", "82": "Controle d'attitude", "83": "Carburant de fusee", "84": "Reservoir", "85": "Fusee a propergol solide", "86": "Moteur de fusee", "87": "Bouclier thermique", "88": "Propulseur ionique", "89": "Reacteur", "98": "Quadricoptere", "100": "Recherche aerospatiale", "101": "Beton arme", "102": "Briques", "103": "Ciment", "104": "Argile", "105": "Calcaire", "106": "Bois", "107": "Poutres d'acier", "108": "Planches", "109": "Fenetres", "110": "Outils", "111": "Unites de construction", "112": "Bulldozer", "113": "Recherche materiaux", "114": "Robots", "115": "Vache", "116": "Cochon", "117": "Lait", "118": "Grains de cafe", "119": "Cafe moulu", "120": "Legumes", "121": "Pain", "122": "Fromage", "123": "Tarte aux pommes", "124": "Jus d'orange", "125": "Cidre", "126": "Biere de gingembre", "127": "Pizza", "128": "Pates", "129": "Hamburger", "130": "Lasagnes", "131": "Boulettes", "132": "Cocktails", "133": "Farine", "134": "Beurre", "135": "Sucre", "136": "Feves de cacao", "137": "Pate", "138": "Sauciere", "139": "Fourrage", "140": "Chocolat", "141": "Huile vegetale", "142": "Salade", "143": "Samosas", "144": "Boule de Noel", "145": "Recettes", "146": "Citrouille", "147": "Citrouille sculptee", "148": "Costume de sorciere", "149": "Soupe de citrouille", "150": "Sapin", "151": "Lapin de Paques", "152": "Douceurs du Ramadan", "153": "Glace chocolat", "154": "Glace pomme", "155": "Oeuf en creme"};
+
+const RAW = "https://raw.githubusercontent.com/cherlo30/simco-market/main/";
+const nom = k => NOMS[k] || ("ressource " + k);
+const fmt = (v, d) => v == null || !isFinite(v) ? "—" :
+  v.toLocaleString("fr-FR", {minimumFractionDigits: d, maximumFractionDigits: d});
+// precision adaptee : 0,2580 $ pour l'eau, 6,60 $ pour la citrouille
+const prix = v => v == null || !isFinite(v) ? "\u2014" :
+  v.toLocaleString("fr-FR", Math.abs(v) < 1
+    ? {minimumFractionDigits: 4, maximumFractionDigits: 4}
+    : {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const ent = v => v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("fr-FR");
+
+/* ---------- lecture des CSV ---------------------------------------- */
+
+async function charge(chemin) {
+  for (const base of ["", RAW]) {
+    try {
+      const r = await fetch(base + chemin, {cache: "no-store"});
+      if (r.ok) return await r.text();
+    } catch (e) { /* on tente la source suivante */ }
+  }
+  return null;
+}
+
+// Ignore les lignes dont le nombre de colonnes ne colle pas a l'en-tete :
+// un fichier ecrit par deux versions du collecteur en contient.
+function csv(texte) {
+  const l = texte.trim().split("\n").map(x => x.replace(/\r$/, ""));
+  const en = l[0].split(",");
+  const out = [];
+  for (let i = 1; i < l.length; i++) {
+    const c = l[i].split(",");
+    if (c.length !== en.length) continue;
+    const o = {};
+    en.forEach((k, j) => o[k] = c[j]);
+    out.push(o);
+  }
+  return out;
+}
+
+const num = x => {
+  if (x === undefined || x === null || x === "") return null;
+  const v = Number(x);
+  return isFinite(v) ? v : null;
+};
+
+/* ---------- etat --------------------------------------------------- */
+
+let LIGNES = [];        // toutes les lignes horaires
+let PARCLE = new Map(); // "kind|quality" -> lignes triees
+
+async function demarrer() {
+  const now = new Date();
+  const mois = [];
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    mois.push(d.toISOString().slice(0, 7));
+  }
+  const textes = await Promise.all(mois.map(m => charge("data/hourly/" + m + ".csv")));
+  textes.filter(Boolean).forEach(t => LIGNES.push(...csv(t)));
+
+  if (!LIGNES.length) {
+    document.getElementById("sub").innerHTML =
+      '<span class="err">Aucune donnee trouvee.</span> Le fichier data/hourly/' +
+      mois[0] + '.csv est-il bien present dans le depot ?';
+    return;
+  }
+
+  for (const r of LIGNES) {
+    const cle = r.kind + "|" + (r.quality || "0");
+    if (!PARCLE.has(cle)) PARCLE.set(cle, []);
+    PARCLE.get(cle).push({
+      h: r.heure,
+      o: num(r.ouverture), hi: num(r.haut), lo: num(r.bas), c: num(r.cloture),
+      n: num(r.n_releves) || 0,
+      vol: num(r.volume) || 0,
+      val: num(r.valeur) || 0,
+      prof: num(r.profondeur_5pct)
+    });
+  }
+  for (const v of PARCLE.values()) v.sort((a, b) => a.h < b.h ? -1 : 1);
+
+  // liste des ressources, les mieux suivies d'abord
+  const compte = new Map();
+  for (const r of LIGNES) {
+    const k = Number(r.kind);
+    compte.set(k, (compte.get(k) || 0) + 1);
+  }
+  const kinds = [...compte.keys()].sort((a, b) => nom(a).localeCompare(nom(b), "fr"));
+  const sel = document.getElementById("res");
+  for (const k of kinds) {
+    const o = document.createElement("option");
+    o.value = k; o.textContent = nom(k) + "  (" + k + ")";
+    sel.appendChild(o);
+  }
+  sel.value = kinds.includes(146) ? 146 : kinds[0];
+
+  const derniere = LIGNES.reduce((m, r) => r.heure > m ? r.heure : m, "");
+  document.getElementById("sub").textContent =
+    kinds.length + " ressources suivies · " + LIGNES.length.toLocaleString("fr-FR") +
+    " heures enregistrees · dernier releve " + derniere.replace("T", " a ") + " h UTC";
+  document.getElementById("foot").textContent =
+    "Donnees collectees en continu depuis GitHub Actions. La page lit les fichiers du depot a chaque ouverture.";
+
+  ["res", "qual", "jours", "i_frais", "i_tr", "i_tru", "i_qte"]
+    .forEach(id => document.getElementById(id)
+      .addEventListener("change", id === "res" ? majQualites : dessine));
+  majQualites();
+}
+
+function majQualites() {
+  const k = document.getElementById("res").value;
+  const qs = [...PARCLE.keys()].filter(c => c.split("|")[0] === k)
+    .map(c => Number(c.split("|")[1])).sort((a, b) => a - b);
+  const sel = document.getElementById("qual");
+  const avant = sel.value;
+  sel.innerHTML = "";
+  for (const q of qs) {
+    const o = document.createElement("option");
+    o.value = q; o.textContent = q === 0 ? "0 etoile" : q + (q > 1 ? " etoiles" : " etoile");
+    sel.appendChild(o);
+  }
+  sel.value = (avant !== "" && qs.includes(Number(avant))) ? avant
+            : (qs.includes(0) ? "0" : String(qs[0]));
+  dessine();
+}
+
+/* ---------- primitives de dessin ----------------------------------- */
+
+const W = 880, H = 260, M = {t: 14, r: 54, b: 30, l: 56};
+
+function svg(inner, h) {
+  return '<svg viewBox="0 0 ' + W + ' ' + (h || H) + '" preserveAspectRatio="xMidYMid meet">' +
+    inner + '</svg>';
+}
+
+function echelle(min, max, taille) {
+  if (min === max) { min -= 1; max += 1; }
+  const pad = (max - min) * 0.08;
+  min -= pad; max += pad;
+  return v => taille - (v - min) / (max - min) * taille;
+}
+
+function ticks(min, max, n) {
+  if (min === max) return [min];
+  const brut = (max - min) / n;
+  const mag = Math.pow(10, Math.floor(Math.log10(brut)));
+  const pas = [1, 2, 2.5, 5, 10].map(x => x * mag).find(x => x >= brut) || mag * 10;
+  const out = [];
+  for (let v = Math.ceil(min / pas) * pas; v <= max + 1e-9; v += pas) out.push(v);
+  return out;
+}
+
+function grille(vals, y, dec, largeur) {
+  return vals.map(v =>
+    '<line class="gl" x1="0" y1="' + y(v).toFixed(1) + '" x2="' + largeur +
+    '" y2="' + y(v).toFixed(1) + '"/>' +
+    '<text class="tk r" x="-8" y="' + (y(v) + 4).toFixed(1) + '">' + (dec === null ? prix(v) : fmt(v, dec)) + '</text>'
+  ).join("");
+}
+
+/* ---------- le rendu ----------------------------------------------- */
+
+function dessine() {
+  const k = document.getElementById("res").value;
+  const q = document.getElementById("qual").value;
+  const jours = Number(document.getElementById("jours").value);
+  let pts = PARCLE.get(k + "|" + q) || [];
+
+  if (jours < 999 && pts.length) {
+    const fin = new Date(pts[pts.length - 1].h + ":00:00Z").getTime();
+    pts = pts.filter(p => new Date(p.h + ":00:00Z").getTime() >= fin - jours * 864e5);
+  }
+
+  kpis(pts, k, q);
+  courbePrix(pts);
+  courbeProfondeur(pts);
+  profilHoraire(k, q);
+  echelleQualite(k);
+  netVente(pts);
+  tableau(pts);
+}
+
+/* --- les indicateurs du haut --- */
+function kpis(pts, k, q) {
+  const avecPrix = pts.filter(p => p.c != null);
+  const der = avecPrix[avecPrix.length - 1];
+  const box = document.getElementById("kpis");
+  if (!der) {
+    box.innerHTML = '<div class="kpi"><div class="k">Prix</div><div class="v">—</div>' +
+      '<div class="n">Pas encore de releve pour ce niveau de qualite.</div></div>';
+    return;
+  }
+  const t24 = new Date(der.h + ":00:00Z").getTime() - 24 * 3600e3;
+  const ref = avecPrix.filter(p => new Date(p.h + ":00:00Z").getTime() <= t24).pop();
+  const var24 = ref ? (der.c / ref.c - 1) * 100 : null;
+  const prof = [...pts].reverse().find(p => p.prof != null);
+  const volJour = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > t24)
+    .reduce((s, p) => s + p.vol, 0);
+  const bas = Math.min(...avecPrix.map(p => p.lo ?? p.c));
+  const haut = Math.max(...avecPrix.map(p => p.hi ?? p.c));
+
+  box.innerHTML = [
+    ['Dernier prix', prix(der.c) + ' $', der.h.replace("T", " a ") + " h UTC"],
+    ['Variation 24 h', var24 == null ? '—' :
+      '<span class="' + (var24 >= 0 ? 'up' : 'down') + '">' +
+      (var24 >= 0 ? '+' : '') + fmt(var24, 2) + ' %</span>',
+      ref ? 'depuis ' + prix(ref.c) + ' $' : 'pas assez de recul'],
+    ['Amplitude sur la periode', prix(bas) + ' – ' + prix(haut) + ' $',
+      bas > 0 ? 'ecart de ' + fmt((haut / bas - 1) * 100, 1) + ' %' : 'ecart non calculable'],
+    ['Profondeur a -5 %', prof ? ent(prof.prof) + ' u' : '—',
+      'ecoulable sans casser le prix'],
+    ['Volume 24 h', volJour ? ent(volJour) + ' u' : '—',
+      volJour ? 'unites parties du carnet' : 'se remplit avec le temps']
+  ].map(([a, b, c]) =>
+    '<div class="kpi"><div class="k">' + a + '</div><div class="v">' + b +
+    '</div><div class="n">' + c + '</div></div>').join("");
+}
+
+/* --- courbe de prix, avec bande haut/bas --- */
+function courbePrix(pts) {
+  const el = document.getElementById("c_prix");
+  const p = pts.filter(x => x.c != null);
+  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de relevés."); return; }
+
+  const lw = W - M.l - M.r, lh = H - M.t - M.b;
+  const lows = p.map(x => x.lo ?? x.c), highs = p.map(x => x.hi ?? x.c);
+  const min = Math.min(...lows), max = Math.max(...highs);
+  const y = echelle(min, max, lh);
+  const x = i => i / (p.length - 1) * lw;
+
+  const haut = p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1));
+  const bas = p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse();
+  const bande = '<polygon points="' + haut.concat(bas).join(" ") + '" fill="var(--band)"/>';
+  const trait = '<polyline points="' + p.map((d, i) =>
+    x(i).toFixed(1) + "," + y(d.c).toFixed(1)).join(" ") +
+    '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>';
+
+  const der = p[p.length - 1];
+  const pastille = '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(der.c).toFixed(1) +
+    '" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>' +
+    '<text class="lbl" x="' + (x(p.length - 1) + 9).toFixed(1) + '" y="' +
+    (y(der.c) + 4).toFixed(1) + '">' + prix(der.c) + ' $</text>';
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(min, max, 4), y, null, lw) + bande + trait + pastille +
+    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
+    axeTemps(p, x, lh) +
+    '<line id="cr_prix" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh + '" fill="transparent" id="hit_prix"/>' +
+    '</g>');
+  survol(el, "prix", p, lw, i =>
+    p[i].h.replace("T", " a ") + " h<br><b>" + prix(p[i].c) + " $</b>" +
+    (p[i].hi != null ? '<br><span class="dim">haut ' + prix(p[i].hi) +
+      " · bas " + prix(p[i].lo) + "</span>" : ""));
+}
+
+/* --- profondeur --- */
+function courbeProfondeur(pts) {
+  const el = document.getElementById("c_prof");
+  const p = pts.filter(x => x.prof != null);
+  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de relevés de carnet."); return; }
+
+  const lh = 180, lw = W - M.l - M.r;
+  const max = Math.max(...p.map(d => d.prof)), min = 0;
+  const y = echelle(min, max, lh);
+  const x = i => i / (p.length - 1) * lw;
+  const aire = '<polygon points="0,' + y(0).toFixed(1) + " " +
+    p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
+    " " + lw + "," + y(0).toFixed(1) + '" fill="var(--band)"/>';
+  const trait = '<polyline points="' + p.map((d, i) =>
+    x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
+    '" fill="none" stroke="var(--s1)" stroke-width="2"/>';
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(min, max, 3), y, 0, lw) + aire + trait +
+    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
+    axeTemps(p, x, lh) +
+    '<line id="cr_prof" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh + '" fill="transparent" id="hit_prof"/>' +
+    '</g>', lh + M.t + M.b);
+  survol(el, "prof", p, lw, i =>
+    p[i].h.replace("T", " a ") + " h<br><b>" + ent(p[i].prof) + " u</b> a moins de 5 %");
+}
+
+/* --- profil par heure de la journee : le graphique qui rapporte --- */
+function profilHoraire(k, q) {
+  const el = document.getElementById("c_heure");
+  const tous = PARCLE.get(k + "|" + q) || [];
+  const parJour = new Map();
+  for (const p of tous) {
+    if (p.c == null) continue;
+    const j = p.h.slice(0, 10);
+    if (!parJour.has(j)) parJour.set(j, []);
+    parJour.get(j).push(p);
+  }
+  const acc = Array.from({length: 24}, () => []);
+  let nJours = 0;
+  for (const [, lignes] of parJour) {
+    if (lignes.length < 6) continue;      // journee trop incomplete
+    nJours++;
+    const moy = lignes.reduce((s, p) => s + p.c, 0) / lignes.length;
+    for (const p of lignes) acc[Number(p.h.slice(11, 13))].push((p.c / moy - 1) * 100);
+  }
+  const med = acc.map(a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null);
+  const dispo = med.filter(v => v != null);
+
+  document.getElementById("h_prof").textContent = nJours < 2
+    ? "Ecart moyen du prix par rapport a la moyenne du jour, heure par heure (UTC). " +
+      "Base sur " + nJours + " journee(s) : beaucoup trop peu pour en tirer une regle. Reviens dans quelques jours."
+    : "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC), sur " +
+      nJours + " journees. Au-dessus de zero : le prix y est habituellement plus haut.";
+
+  if (dispo.length < 4) { el.innerHTML = vide("Pas encore assez d'heures couvertes."); return; }
+
+  const lh = 190, lw = W - M.l - M.r;
+  const max = Math.max(...dispo, 0.5), min = Math.min(...dispo, -0.5);
+  const y = echelle(min, max, lh);
+  const bw = lw / 24;
+  const barres = med.map((v, h) => {
+    if (v == null) return "";
+    const y0 = y(0), y1 = y(v);
+    const ht = Math.max(Math.abs(y1 - y0), 1.5);
+    const col = v >= 0 ? "var(--s1)" : "var(--s2)";
+    return '<rect x="' + (h * bw + 2).toFixed(1) + '" y="' + Math.min(y0, y1).toFixed(1) +
+      '" width="' + (bw - 4).toFixed(1) + '" height="' + ht.toFixed(1) +
+      '" rx="3" fill="' + col + '"/>';
+  }).join("");
+  const ax = med.map((v, h) => h % 3 === 0
+    ? '<text class="tk m" x="' + (h * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
+      String(h).padStart(2, "0") + "</text>" : "").join("");
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(min, max, 4), y, 2, lw) + barres +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' + y(0).toFixed(1) + '"/>' +
+    ax + '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 30) + '">heure UTC</text>' +
+    '</g>', lh + M.t + M.b + 14);
+}
+
+/* --- echelle de qualite --- */
+function echelleQualite(k) {
+  const el = document.getElementById("c_qual");
+  const lignes = [];
+  for (const [cle, v] of PARCLE) {
+    if (cle.split("|")[0] !== String(k)) continue;
+    const der = [...v].reverse().find(p => p.c != null);
+    if (der) lignes.push({q: Number(cle.split("|")[1]), p: der.c, h: der.h});
+  }
+  lignes.sort((a, b) => a.q - b.q);
+  if (lignes.length < 2) { el.innerHTML = vide("Une seule qualite observee pour cette ressource."); return; }
+
+  const lh = 180, lw = W - M.l - M.r;
+  const max = Math.max(...lignes.map(l => l.p));
+  const y = echelle(0, max, lh);
+  const bw = lw / lignes.length;
+  const base = lignes.find(l => l.q === 0);
+  const barres = lignes.map((l, i) => {
+    const y1 = y(l.p), y0 = y(0);
+    const ecart = base ? (l.p / base.p - 1) * 100 : null;
+    return '<rect x="' + (i * bw + 3).toFixed(1) + '" y="' + y1.toFixed(1) +
+      '" width="' + (bw - 6).toFixed(1) + '" height="' + (y0 - y1).toFixed(1) +
+      '" rx="4" fill="var(--s1)"/>' +
+      '<text class="lbl m" text-anchor="middle" x="' + (i * bw + bw / 2).toFixed(1) +
+      '" y="' + (y1 - 7).toFixed(1) + '">' + prix(l.p) + '</text>' +
+      (ecart && Math.abs(ecart) > 0.5
+        ? '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (y1 - 21).toFixed(1) +
+          '">' + (ecart > 0 ? "+" : "") + fmt(ecart, 0) + ' %</text>' : "") +
+      '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
+      l.q + (l.q === 0 ? "" : "★") + '</text>';
+  }).join("");
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(0, max, 3), y, null, lw) + barres +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' + y(0).toFixed(1) + '"/>' +
+    '</g>', lh + M.t + M.b + 6);
+}
+
+/* --- le net reellement encaisse --- */
+function netVente(pts) {
+  const der = [...pts].reverse().find(p => p.c != null);
+  const tb = document.getElementById("t_net");
+  const nt = document.getElementById("n_net");
+  if (!der) { tb.innerHTML = ""; nt.textContent = "Pas de prix disponible."; return; }
+
+  const P = der.c;
+  const frais = Number(document.getElementById("i_frais").value) / 100;
+  const ptr = Number(document.getElementById("i_tr").value);
+  const tru = Number(document.getElementById("i_tru").value);
+  const qte = Number(document.getElementById("i_qte").value) || 0;
+
+  const netB = P * (1 - frais) - ptr * tru;        // bourse : frais + 1 transport/article
+  const netC = P - ptr * tru * 0.5;                // contrat : moitie moins de transport
+  const l = (t, n, d) =>
+    '<tr><td>' + t + '</td><td>' + fmt(n, 4) + ' $</td><td>' + fmt(n / P * 100, 1) +
+    ' %</td><td>' + ent(n * qte) + ' $</td><td class="dim">' + d + '</td></tr>';
+
+  tb.innerHTML = '<tr><th>Canal</th><th>Net par unite</th><th>Part du prix</th>' +
+    '<th>Sur ' + ent(qte) + ' u</th><th>Detail</th></tr>' +
+    l("Contrat direct", netC, "prix &minus; " + fmt(ptr * tru * 0.5, 4) + " de transport") +
+    l("Bourse", netB, fmt(frais * 100, 1) + " % de frais + " + fmt(ptr * tru, 4) + " de transport");
+
+  const gain = (netC - netB) * qte;
+  nt.innerHTML = "Au prix actuel de <b>" + prix(P) + " $</b>, le contrat rapporte <b>" +
+    fmt(netC - netB, 4) + " $ de plus par unite</b> qu'une vente en bourse, soit <b>" +
+    ent(gain) + " $</b> sur " + ent(qte) + " unites. " +
+    "Autrement dit tu peux vendre en contrat jusqu'a <b>" + prix(netB + ptr * tru * 0.5) +
+    " $</b> — soit " + fmt((netB + ptr * tru * 0.5) / P * 100 - 100, 2) +
+    " % sous le marche — et encaisser autant qu'en bourse au prix affiche.";
+}
+
+/* --- tableau --- */
+function tableau(pts) {
+  const p = pts.slice(-20).reverse();
+  document.getElementById("t_tab").innerHTML =
+    '<tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th><th>Cloture</th>' +
+    '<th>Releves</th><th>Volume</th><th>Profondeur -5 %</th></tr>' +
+    (p.length ? p.map(d =>
+      '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" + prix(d.o) + "</td><td>" +
+      prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" + prix(d.c) + "</td><td>" +
+      d.n + "</td><td>" + (d.vol ? ent(d.vol) : '<span class="dim">—</span>') + "</td><td>" +
+      (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') + "</td></tr>").join("")
+      : '<tr><td colspan="8" class="dim">Rien a afficher.</td></tr>');
+}
+
+/* --- utilitaires --- */
+function vide(msg) {
+  return '<p class="dim" style="padding:26px 0 34px;text-align:center">' + msg + "</p>";
+}
+
+function axeTemps(p, x, lh) {
+  const n = Math.min(6, p.length);
+  const out = [];
+  for (let j = 0; j < n; j++) {
+    const i = Math.round(j / (n - 1) * (p.length - 1));
+    const h = p[i].h;
+    out.push('<text class="tk m" x="' + x(i).toFixed(1) + '" y="' + (lh + 18) + '">' +
+      h.slice(8, 10) + "/" + h.slice(5, 7) + " " + h.slice(11, 13) + "h</text>");
+  }
+  return out.join("");
+}
+
+function survol(el, cle, p, lw, texte) {
+  const hit = el.querySelector("#hit_" + cle);
+  const cr = el.querySelector("#cr_" + cle);
+  const tip = document.getElementById("t_" + cle);
+  if (!hit) return;
+  hit.addEventListener("mousemove", e => {
+    const r = hit.getBoundingClientRect();
+    const f = (e.clientX - r.left) / r.width;
+    const i = Math.max(0, Math.min(p.length - 1, Math.round(f * (p.length - 1))));
+    const xs = i / (p.length - 1) * lw;
+    cr.setAttribute("x1", xs); cr.setAttribute("x2", xs); cr.setAttribute("opacity", "1");
+    tip.innerHTML = texte(i);
+    tip.style.opacity = "1";
+    const c = el.parentElement.getBoundingClientRect();
+    tip.style.left = Math.min(c.width - 170, Math.max(8, e.clientX - c.left + 12)) + "px";
+    tip.style.top = (e.clientY - c.top - 6) + "px";
+  });
+  hit.addEventListener("mouseleave", () => {
+    cr.setAttribute("opacity", "0"); tip.style.opacity = "0";
+  });
+}
+
+demarrer();
+</script>
+</body>
+</html>
