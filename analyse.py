@@ -5,6 +5,10 @@
   python3 analyse.py 146 2 66 13      plusieurs ressources
   python3 analyse.py 146 --volume     + le volume reellement echange
   python3 analyse.py --top            les ressources les plus liquides
+  python3 analyse.py 146 --q 4        la citrouille en qualite 4 etoiles
+
+Chaque commande affiche aussi l'echelle de qualite : le prix de la ressource
+a chaque niveau d'etoiles, et l'ecart avec la qualite 0.
 """
 import csv, glob, gzip, os, statistics, sys
 from collections import defaultdict
@@ -22,23 +26,50 @@ def nom(k):
     return NOMS.get(k, f"ressource {k}")
 
 
-def lire_prix(kind):
+def lire_prix(kind, qual=0):
     pts = []
-    for f in sorted(glob.glob("data/ticker/*.csv")):
+    if qual == 0:
+        for f in sorted(glob.glob("data/ticker/*.csv")):
+            with open(f) as fh:
+                for r in csv.DictReader(fh):
+                    if int(r["kind"]) == kind:
+                        pts.append((r["ts"], float(r["price"])))
+    for f in sorted(glob.glob("data/book/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
-                if int(r["kind"]) == kind:
-                    pts.append((r["ts"], float(r["price"])))
+                if int(r["kind"]) == kind and int(r.get("quality") or 0) == qual:
+                    pts.append((r["ts"], float(r["best"])))
     for f in sorted(glob.glob("data/hourly/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
-                if int(r["kind"]) == kind and r["cloture"]:
+                if (int(r["kind"]) == kind and int(r.get("quality") or 0) == qual
+                        and r["cloture"]):
                     pts.append((r["heure"] + ":30:00Z", float(r["cloture"])))
     return sorted(set(pts))
 
 
-def profil(kind, tr=1.0):
-    pts = lire_prix(kind)
+def echelle_qualite(kind):
+    """Prix le plus recent par niveau de qualite."""
+    dern = {}
+    for f in sorted(glob.glob("data/book/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if int(r["kind"]) == kind and r.get("best"):
+                    dern[int(r.get("quality") or 0)] = (r["ts"], float(r["best"]),
+                                                        int(r["total_qty"]))
+    if len(dern) < 2:
+        return
+    base = dern.get(0, (None, None, None))[1]
+    print(f"\nEchelle de qualite — {nom(kind)}")
+    print(f"{'Q':>3}{'prix':>10}{'vs Q0':>9}{'profondeur':>13}")
+    for q in sorted(dern):
+        _, p, tot = dern[q]
+        ecart = f"{(p/base-1)*100:+.1f}%" if base else ""
+        print(f"{q:>3}{p:>10.3f}{ecart:>9}{tot:>13,}")
+
+
+def profil(kind, tr=1.0, qual=0):
+    pts = lire_prix(kind, qual)
     if len(pts) < 8:
         print(f"\n{nom(kind)} : {len(pts)} releves — reviens dans quelques heures.")
         return
@@ -134,7 +165,12 @@ if __name__ == "__main__":
     if "--top" in args:
         top(); sys.exit()
     kinds = [int(a) for a in args if a.lstrip("-").isdigit()] or [146]
+    qual = 0
+    for i, a_ in enumerate(args):
+        if a_ == "--q" and i + 1 < len(args):
+            qual = int(args[i + 1])
     for k in kinds:
-        profil(k, tr=1.0 if k in (146, 44) else 0.1)
+        profil(k, tr=1.0 if k in (146, 44) else 0.1, qual=qual)
+        echelle_qualite(k)
         if "--volume" in args:
             volume(k)

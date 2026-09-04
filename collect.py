@@ -9,15 +9,18 @@ evenement.
 
 Sorties
   data/tape/AAAA-MM/AAAA-MM-JJ.csv.gz   la bande des mouvements
-  data/book/AAAA-MM-JJ.csv              un resume par tour et par ressource
+  data/book/AAAA-MM-JJ.csv              un resume par tour, ressource ET qualite
   data/ticker/AAAA-MM-JJ.csv            le prix des 155 ressources, ~30 s
+
+Toutes les qualites (0 a 12 etoiles) sont suivies : une meme ressource en Q4
+se vend couramment 20 a 25 % plus cher qu'en Q0.
 """
 import csv, gzip, json, os, statistics, subprocess, time, urllib.request
 from datetime import datetime, timezone
 
 REALM = 0
 TICKER = f"https://www.simcompanies.com/api/v3/market-ticker/{REALM}/"
-BOOK = "https://www.simcompanies.com/api/v3/market/%d/%d/"
+BOOK = "https://www.simcompanies.com/api/v3/market/all/%d/%d/"
 UA = "Mozilla/5.0 (compatible; simco-market-logger/2.0)"
 
 DELAY = float(os.environ.get("DELAY", "0.8"))          # entre deux requetes
@@ -75,16 +78,17 @@ class Sortie:
         self.f_tape = gzip.open(p, "at", newline="")
         self.w_tape = csv.writer(self.f_tape)
         if neuf:
-            self.w_tape.writerow(["ts", "kind", "evt", "order_id", "price",
-                                  "qty", "delta", "seller_id", "reprise"])
+            self.w_tape.writerow(["ts", "kind", "quality", "evt", "order_id",
+                                  "price", "qty", "delta", "seller_id", "reprise"])
 
         p = f"data/book/{j}.csv"
         neuf = not os.path.exists(p)
         self.f_book = open(p, "a", newline="")
         self.w_book = csv.writer(self.f_book)
         if neuf:
-            self.w_book.writerow(["ts", "kind", "best", "qty_best", "n_orders",
-                                  "total_qty", "qty_within_5pct", "median_age_h"])
+            self.w_book.writerow(["ts", "kind", "quality", "best", "qty_best",
+                                  "n_orders", "total_qty", "qty_within_5pct",
+                                  "median_age_h"])
 
         p = f"data/ticker/{j}.csv"
         neuf = not os.path.exists(p)
@@ -173,41 +177,46 @@ def main():
             ts = stamp(now)
             book.sort(key=lambda x: x["price"])
 
-            # --- resume du carnet
-            if book:
-                best = book[0]["price"]
+            # --- resume du carnet, une ligne par niveau de qualite
+            par_q = {}
+            for x in book:
+                par_q.setdefault(x.get("quality", 0), []).append(x)
+            for q in sorted(par_q):
+                sous = par_q[q]
+                best = sous[0]["price"]
                 ages = [v for v in (age_h(x.get("posted") or "", now)
-                                    for x in book[:20]) if v != ""]
+                                    for x in sous[:20]) if v != ""]
                 out.w_book.writerow([
-                    ts, k, best,
-                    sum(x["quantity"] for x in book if x["price"] == best),
-                    len(book), sum(x["quantity"] for x in book),
-                    sum(x["quantity"] for x in book if x["price"] <= best * 1.05),
+                    ts, k, q, best,
+                    sum(x["quantity"] for x in sous if x["price"] == best),
+                    len(sous), sum(x["quantity"] for x in sous),
+                    sum(x["quantity"] for x in sous if x["price"] <= best * 1.05),
                     round(statistics.median(ages), 3) if ages else ""])
 
             # --- mouvements depuis le tour precedent
-            neuf = {str(x["id"]): (x["price"], x["quantity"]) for x in book}
+            neuf = {str(x["id"]): (x["price"], x["quantity"],
+                                   x.get("quality", 0)) for x in book}
             vendeurs = {str(x["id"]): (x.get("seller") or {}).get("id", "")
                         for x in book}
             ancien = etat.get(k)
             reprise = 1 if ancien is None else 0
             ancien = ancien or {}
 
-            for oid, (p, q) in neuf.items():
+            for oid, (p, qt, ql) in neuf.items():
                 if oid not in ancien:
-                    out.w_tape.writerow([ts, k, "N", oid, p, q, "",
+                    out.w_tape.writerow([ts, k, ql, "N", oid, p, qt, "",
                                          vendeurs[oid], reprise]); evts += 1
                 else:
-                    ap, aq = ancien[oid]
-                    if q != aq:
-                        out.w_tape.writerow([ts, k, "C", oid, p, q, aq - q,
+                    ap, aq, _ = ancien[oid]
+                    if qt != aq:
+                        out.w_tape.writerow([ts, k, ql, "C", oid, p, qt, aq - qt,
                                              vendeurs[oid], 0]); evts += 1
                     if p != ap:
-                        out.w_tape.writerow([ts, k, "P", oid, p, q, "",
+                        out.w_tape.writerow([ts, k, ql, "P", oid, p, qt, "",
                                              vendeurs[oid], 0]); evts += 1
-            for oid, (p, q) in ancien.items():
+            for oid, (p, qt, ql) in ancien.items():
                 if oid not in neuf:
-                    out.w_tape.writerow([ts, k, "X", oid, p, 0, q, "", 0])
+                    out.w_tape.writerow([ts, k, ql, "X", oid, p, 0, qt, "", 0])
                     evts += 1
             etat[k] = neuf
 

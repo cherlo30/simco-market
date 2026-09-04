@@ -21,22 +21,26 @@ def heure(ts):
 
 
 def main():
-    prix = defaultdict(list)        # (heure, kind) -> [prix]
-    vol = defaultdict(float)        # (heure, kind) -> unites vendues
-    val = defaultdict(float)        # (heure, kind) -> valeur echangee
-    prof = defaultdict(list)        # (heure, kind) -> [profondeur a -5%]
+    prix = defaultdict(list)        # (heure, kind, qualite) -> [prix]
+    vol = defaultdict(float)        # unites vendues
+    val = defaultdict(float)        # valeur echangee
+    prof = defaultdict(list)        # profondeur a -5 %
 
     for f in sorted(glob.glob("data/ticker/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
-                prix[(heure(r["ts"]), int(r["kind"]))].append(float(r["price"]))
+                prix[(heure(r["ts"]), int(r["kind"]), 0)].append(float(r["price"]))
 
     for f in sorted(glob.glob("data/book/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
                 if r.get("qty_within_5pct"):
-                    prof[(heure(r["ts"]), int(r["kind"]))].append(
+                    q = int(r.get("quality") or 0)
+                    prof[(heure(r["ts"]), int(r["kind"]), q)].append(
                         float(r["qty_within_5pct"]))
+                    if r.get("best"):
+                        prix[(heure(r["ts"]), int(r["kind"]), q)].append(
+                            float(r["best"]))
 
     for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
         with gzip.open(f, "rt") as fh:
@@ -44,17 +48,18 @@ def main():
                 if r["evt"] in ("C", "X") and r["reprise"] != "1" and r["delta"]:
                     d = float(r["delta"])
                     if d > 0:
-                        k = (heure(r["ts"]), int(r["kind"]))
+                        k = (heure(r["ts"]), int(r["kind"]),
+                             int(r.get("quality") or 0))
                         vol[k] += d
                         val[k] += d * float(r["price"] or 0)
 
     os.makedirs(SORTIE, exist_ok=True)
     par_mois = defaultdict(list)
     for cle in sorted(set(prix) | set(vol) | set(prof)):
-        h, k = cle
+        h, k, q = cle
         p = prix.get(cle) or []
         par_mois[h[:7]].append([
-            h, k,
+            h, k, q,
             p[0] if p else "", max(p) if p else "", min(p) if p else "",
             p[-1] if p else "", len(p),
             round(vol.get(cle, 0)), round(val.get(cle, 0)),
@@ -64,8 +69,9 @@ def main():
     for mois, lignes in par_mois.items():
         with open(f"{SORTIE}/{mois}.csv", "w", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(["heure", "kind", "ouverture", "haut", "bas", "cloture",
-                        "n_releves", "volume", "valeur", "profondeur_5pct"])
+            w.writerow(["heure", "kind", "quality", "ouverture", "haut", "bas",
+                        "cloture", "n_releves", "volume", "valeur",
+                        "profondeur_5pct"])
             w.writerows(lignes)
         print(f"{SORTIE}/{mois}.csv : {len(lignes)} lignes")
 
