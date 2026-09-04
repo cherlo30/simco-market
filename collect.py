@@ -15,7 +15,8 @@ Sorties
 Toutes les qualites (0 a 12 etoiles) sont suivies : une meme ressource en Q4
 se vend couramment 20 a 25 % plus cher qu'en Q0.
 """
-import csv, functools, gzip, json, os, statistics, subprocess, sys, time, urllib.request
+import csv, functools, gzip, json, os, statistics, subprocess, sys, time
+import urllib.request, urllib.error
 
 print = functools.partial(print, flush=True)   # journal lisible en direct
 from datetime import datetime, timezone
@@ -25,19 +26,43 @@ TICKER = f"https://www.simcompanies.com/api/v3/market-ticker/{REALM}/"
 BOOK = "https://www.simcompanies.com/api/v3/market/all/%d/%d/"
 UA = "Mozilla/5.0 (compatible; simco-market-logger/2.0)"
 
-DELAY = float(os.environ.get("DELAY", "0.8"))          # entre deux requetes
+DELAY = float(os.environ.get("DELAY", "1.3"))          # entre deux requetes
 TICKER_SEC = int(os.environ.get("TICKER_SEC", "30"))   # frequence du ticker
 DUREE = int(os.environ.get("DUREE_MIN", "330")) * 60   # duree de vie du process
 COMMIT_SEC = int(os.environ.get("COMMIT_SEC", "600"))  # sauvegarde reguliere
 
 
-def fetch(url, tries=3):
+# Frein automatique. Le serveur du jeu repond 429 ("trop de requetes") quand
+# on tape trop vite. A chaque 429 on ralentit un peu ; quand tout passe, on
+# reaccelere doucement. Le collecteur trouve tout seul le rythme accepte.
+FREIN = [0.0]        # secondes ajoutees a DELAY entre deux requetes
+N429 = [0]           # compteur, pour le journal
+
+
+def fetch(url, tries=4):
     for i in range(tries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                        "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r:
-                return json.loads(r.read().decode())
+                d = json.loads(r.read().decode())
+            FREIN[0] = max(0.0, FREIN[0] - 0.02)      # on relache doucement
+            return d
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                N429[0] += 1
+                FREIN[0] = min(4.0, FREIN[0] + 0.3)   # on ralentit
+                attente = 0.0
+                try:
+                    attente = float(e.headers.get("Retry-After") or 0)
+                except Exception:
+                    pass
+                time.sleep(max(attente, 3.0 * (i + 1)))
+                continue
+            if i == tries - 1:
+                print(f"  ! {url.rsplit('/',3)[-3:]} : {e}")
+            else:
+                time.sleep(1.5 * (i + 1))
         except Exception as e:
             if i == tries - 1:
                 print(f"  ! {url.rsplit('/',3)[-3:]} : {e}")
@@ -178,10 +203,10 @@ def main():
                     if rates_tick[0] in (1, 5, 20, 100):
                         print(f"  ticker indisponible ({rates_tick[0]} echecs "
                               f"d'affilee) — on continue et on reessaie")
-                time.sleep(DELAY)
+                time.sleep(DELAY + FREIN[0])
 
             book = fetch(BOOK % (REALM, k))
-            time.sleep(DELAY)
+            time.sleep(DELAY + FREIN[0])
             if book is None:
                 continue
             now = datetime.now(timezone.utc)
@@ -234,7 +259,8 @@ def main():
         out.vider()
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
               f"{evts} mouvements cumules, "
-              f"dernier ticker il y a {int(time.time()-dernier_ticker)} s")
+              f"dernier ticker il y a {int(time.time()-dernier_ticker)} s, "
+                  f"frein {FREIN[0]:.2f} s, {N429[0]} refus 429")
 
         if time.time() - dernier_commit > COMMIT_SEC:
             out.boucler(datetime.now(timezone.utc))
