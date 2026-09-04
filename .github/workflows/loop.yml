@@ -32,23 +32,21 @@ jobs:
           git config user.name  "market-bot"
           git config user.email "market-bot@users.noreply.github.com"
 
+      # collect.py enregistre lui-meme : le carnet sur la branche live a
+      # chaque envoi, les heures terminees sur la branche principale.
       - name: collecter
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
           DELAY: "1.3"
-          TICKER_SEC: "30"
+          LIVE_SEC: "300"
 
-      - name: synthese et purge
-        if: always()
-        run: python3 rollup.py
-
-      - name: enregistrer
+      - name: filet de securite
         if: always()
         run: |
           git add data
           git diff --staged --quiet && echo "rien de neuf" && exit 0
-          git commit -m "collecte $(date -u +%Y-%m-%dT%H:%MZ)"
+          git commit -m "fin de course $(date -u +%Y-%m-%dT%H:%MZ)"
           for i in 1 2 3 4 5; do
             git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
             sleep $((RANDOM % 10 + 5))
@@ -57,12 +55,10 @@ jobs:
 
       # le temoin passe au coureur suivant.
       # GITHUB_TOKEN ne peut PAS declencher un workflow : il faut le jeton PAT.
-      # Le suivant repart toujours sur la duree normale (330 min), meme si
-      # celui-ci tournait en mode test.
       - name: relancer le suivant
         if: always()
         env:
-          GH_TOKEN: ${{ secrets.PAT }}
+          PAT_BRUT: ${{ secrets.PAT }}
         run: |
           ecoule=$(( $(date +%s) - DEBUT ))
           if [ "$ecoule" -lt 90 ]; then
@@ -70,10 +66,10 @@ jobs:
             echo "fin de course. On ne relance PAS, pour ne pas boucler a l'infini."
             exit 1
           fi
+          GH_TOKEN="$(printf %s "$PAT_BRUT" | tr -d '[:space:]')"
+          export GH_TOKEN
           if [ -z "$GH_TOKEN" ]; then
             echo "Le secret PAT est vide ou absent : impossible de passer le temoin."
-            echo "Settings -> Secrets and variables -> Actions -> New repository secret"
-            echo "Nom : PAT   Valeur : un jeton fin avec Actions = Read and write."
             exit 1
           fi
           echo "Collecte terminee apres ${ecoule}s. Passage du temoin."
