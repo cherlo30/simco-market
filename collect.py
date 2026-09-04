@@ -26,16 +26,46 @@ DEUX BRANCHES
                                             tableau de bord ne charge que le
                                             produit qu'on regarde
 
-VENDU OU RETIRE
----------------
-Le jeu ne permet pas de reduire une offre en vente. Donc toute BAISSE
-PARTIELLE est une vente, sans discussion possible.
+TROIS COLONNES, TROIS DEGRES DE CERTITUDE
+-----------------------------------------
+vendu   : une offre a PERDU une partie de sa quantite. Le jeu ne permet pas
+          a un vendeur de reduire son offre : c'est donc une vente, mesuree,
+          sans discussion.
+disparu : l'offre entiere a disparu ALORS QU'ELLE ETAIT LA MOINS CHERE.
+          Personne n'aurait achete ailleurs, donc c'est probablement une
+          vente — mais ce peut aussi etre une annulation ou une remise en
+          vente a un autre prix. C'est une DEDUCTION, pas une mesure.
+repose  : l'offre a disparu ALORS QU'ELLE NE POUVAIT PAS ETRE ACHETEE (une
+          moins chere est restee intacte), et le MEME vendeur a repose au
+          meme instant sur la meme qualite : il a change son prix.
 
-Seule la disparition complete d'une offre est ambigue : vendue jusqu'au
-dernier, ou retiree par son vendeur. On tranche par le prix — si l'offre
-disparue etait au meilleur prix ou en dessous, personne n'aurait achete
-ailleurs, c'est une VENTE ; s'il restait moins cher sur le marche, c'est un
-RETRAIT.
+          L'ordre des regles compte. Le front passe TOUJOURS en premier :
+          il dit ce qui pouvait physiquement etre achete. La remise en vente
+          ne fait que departager ce qui, de toute facon, ne pouvait pas
+          l'etre. Ainsi le filtre ne peut jamais effacer une vente reelle —
+          un vendeur qui ecoule son offre la moins chere puis en repose une
+          neuve reste compte comme une vente.
+retire  : l'offre entiere a disparu alors qu'une offre MOINS CHERE est
+          restee intacte. Un acheteur aurait pris la moins chere d'abord :
+          celle-ci n'a donc pas ete vendue, son vendeur l'a retiree.
+
+COMMENT ON SEPARE VENTE ET RETRAIT
+----------------------------------
+Un achat consomme le carnet par le bas, en bloc continu : la moins chere
+d'abord, puis la suivante, jusqu'a ce que la quantite voulue soit atteinte.
+Les offres du milieu disparaissent donc entierement sans avoir jamais ete
+"la moins chere" au moment ou on les regarde.
+
+On repere donc le FRONT : le prix de la premiere offre restee INTACTE (encore
+la, meme quantite). Tout ce qui a ete consomme en dessous de ce front fait
+partie du meme achat — c'est vendu. Ce qui a disparu au-dessus du front ne
+peut pas avoir ete achete, puisqu'il restait moins cher juste a cote : c'est
+un retrait.
+
+On garde les deux premieres separees parce qu'elles ne valent pas la meme
+chose : sur la citrouille, les baisses partielles totalisent quelques
+milliers d'unites par heure, les disparitions des centaines de milliers.
+Melangees, la deduction ecraserait la mesure.
 """
 import csv, functools, io, json, os, subprocess, sys, time
 import urllib.request, urllib.error
@@ -115,11 +145,16 @@ def git(*a, entree=None):
 
 
 EN_ORDRES = ["kind", "quality", "order_id", "seller_id", "price", "qty",
-             "delta", "vu", "maj"]
+             "delta", "depuis", "passage"]
+#            depuis  : date de mise en vente donnee par le jeu
+#            passage : dernier tour ou le collecteur a VU cette offre. Si elle
+#                      n'a pas ete revue depuis longtemps, c'est que sa
+#                      ressource n'est plus jointe : le tableau de bord doit
+#                      pouvoir le dire au lieu d'afficher un carnet perime.
 EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
               "cloture", "n_ordres", "qte_totale", "profondeur_5pct",
-              "vendu", "retire"]
-EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "n_evt"]
+              "vendu", "disparu", "repose", "retire"]
+EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "disparu", "n_evt"]
 
 
 def en_csv(entete, lignes):
@@ -157,9 +192,10 @@ def charger_live():
         return lire_csv(s.stdout, entete) if s.returncode == 0 else []
 
     ordres = {}
-    for k, q, oid, sid, p, qt, dl, vu, maj in lire("ordres.csv", EN_ORDRES):
-        ordres[oid] = {"kind": int(k), "q": int(q), "sid": sid,
-                       "p": float(p), "qt": float(qt), "vu": vu, "maj": maj}
+    for k, q, oid, sid, p, qt, dl, dep, psg in lire("ordres.csv", EN_ORDRES):
+        ordres[oid] = {"kind": int(k), "q": int(q), "sid": sid, "p": float(p),
+                       "qt": float(qt), "depuis": dep, "passage": psg,
+                       "delta": dl}
 
     agg = {}
     for r_ in lire("heure_horaire.csv", EN_HORAIRE):
@@ -168,11 +204,12 @@ def charger_live():
             "o": flt(r_[3]), "h": flt(r_[4]), "b": flt(r_[5]), "c": flt(r_[6]),
             "n": int(r_[7] or 0), "qte": flt(r_[8]) or 0.0,
             "prof": flt(r_[9]), "vendu": flt(r_[10]) or 0.0,
-            "retire": flt(r_[11]) or 0.0}
+            "disparu": flt(r_[11]) or 0.0, "repose": flt(r_[12]) or 0.0,
+            "retire": flt(r_[13]) or 0.0}
 
     volp = {}
-    for h, k, q, p, v, n in lire("heure_volume.csv", EN_VOLUME):
-        volp[(h, int(k), int(q), float(p))] = [float(v), int(n)]
+    for h, k, q, p, v, d, n in lire("heure_volume.csv", EN_VOLUME):
+        volp[(h, int(k), int(q), float(p))] = [float(v), float(d), int(n)]
 
     print(f"  memoire reprise : {len(ordres)} ordres, "
           f"{len(agg)} heures en cours, {len(volp)} paliers de prix")
@@ -209,24 +246,58 @@ def pousser_live(fichiers):
     return True
 
 
-def ajouter_main(chemin, entete, lignes):
-    """Ajoute des heures TERMINEES a un fichier d'historique."""
+def ajouter_main(chemin, entete, lignes, heures):
+    """Ajoute des heures TERMINEES a un fichier d'historique.
+
+    Trois cas :
+      - le fichier n'existe pas   -> on l'ecrit
+      - une de ces heures y figure deja, ou l'en-tete a change -> on relit
+        tout, on retire les heures concernees, et on reecrit. Sans ca, une
+        heure ecrite deux fois (par exemple apres une reprise) serait comptee
+        deux fois dans les totaux.
+      - sinon -> on ajoute a la suite, ce qui reste le cas courant
+    """
     os.makedirs(os.path.dirname(chemin), exist_ok=True)
-    neuf = not os.path.exists(chemin)
-    if not neuf:
-        with open(chemin) as fh:
-            if fh.readline().strip() != ",".join(entete):
-                # l'en-tete a change : on met l'ancien de cote
-                n = 1
-                while os.path.exists(f"{chemin[:-4]}.ancien{n}.csv"):
-                    n += 1
-                os.rename(chemin, f"{chemin[:-4]}.ancien{n}.csv")
-                neuf = True
-    with open(chemin, "a", newline="") as fh:
-        w = csv.writer(fh)
-        if neuf:
+    if not os.path.exists(chemin):
+        with open(chemin, "w", newline="") as fh:
+            w = csv.writer(fh)
             w.writerow(entete)
-        w.writerows(lignes)
+            w.writerows(lignes)
+        return
+
+    with open(chemin, newline="") as fh:
+        r = csv.reader(fh)
+        try:
+            vieux_entete = next(r)
+        except StopIteration:
+            vieux_entete = []
+        anciennes = [l for l in r if len(l) == len(vieux_entete)]
+
+    doublon = any(l and l[0] in heures for l in anciennes)
+    if vieux_entete == entete and not doublon:
+        with open(chemin, "a", newline="") as fh:
+            csv.writer(fh).writerows(lignes)
+        return
+
+    if vieux_entete != entete:
+        print(f"  {chemin} : en-tete mis a jour, fichier reecrit")
+    if doublon:
+        print(f"  {chemin} : heure(s) deja presente(s), remplacee(s)")
+
+    # on remet chaque ancienne ligne dans la nouvelle grille, par nom de
+    # colonne : une colonne ajoutee reste vide au lieu de tout decaler
+    place = {c: i for i, c in enumerate(vieux_entete)}
+    gardees = []
+    for l in anciennes:
+        if l and l[0] in heures:
+            continue
+        gardees.append([l[place[c]] if c in place else "" for c in entete])
+
+    with open(chemin, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(entete)
+        w.writerows(sorted(gardees + [list(map(str, x)) for x in lignes],
+                           key=lambda x: (x[0], int(x[1]), int(x[2]))))
 
 
 def pousser_main(message):
@@ -246,89 +317,123 @@ def pousser_main(message):
 # ------------------------------------------------------------- traitement
 
 def traiter(kind, book, ordres, agg, volp, ts):
-    """Compare le carnet recu a ce qu'on avait, en tire les ventes."""
+    """Compare le carnet recu a ce qu'on avait, et en tire les ventes."""
     h = heure_de(ts)
     par_q = {}
     for x in book:
         par_q.setdefault(int(x.get("quality", 0)), []).append(x)
 
-    vus = set()
-    for q, offres in par_q.items():
-        offres.sort(key=lambda x: x["price"])
-        meilleur = offres[0]["price"]
-        total = sum(o["quantity"] for o in offres)
-        prof = sum(o["quantity"] for o in offres
-                   if o["price"] <= meilleur * 1.05)
+    neuf = {str(x["id"]): x for x in book}
+    anciens_par_q = {}
+    for oid, v in ordres.items():
+        if v["kind"] == kind:
+            anciens_par_q.setdefault(v["q"], []).append(oid)
 
-        a = agg.get((h, kind, q))
-        if a is None:
-            a = agg[(h, kind, q)] = {"o": meilleur, "h": meilleur,
-                                     "b": meilleur, "c": meilleur, "n": 0,
-                                     "qte": 0.0, "prof": None,
-                                     "vendu": 0.0, "retire": 0.0}
-        a["h"] = max(a["h"], meilleur)
-        a["b"] = min(a["b"], meilleur)
-        a["c"] = meilleur
-        a["n"] = len(offres)
-        a["qte"] = total
-        a["prof"] = prof
+    for q in set(par_q) | set(anciens_par_q):
+        offres = sorted(par_q.get(q, []), key=lambda x: x["price"])
 
-        for o in offres:
-            oid = str(o["id"])
-            vus.add(oid)
-            av = ordres.get(oid)
-            qt = float(o["quantity"])
-            p = float(o["price"])
-            if av is None:
-                ordres[oid] = {"kind": kind, "q": q, "sid": str(
-                    (o.get("seller") or {}).get("id", "")), "p": p, "qt": qt,
-                    # la vraie date de mise en vente, donnee par le jeu, et
-                    # non le moment ou le collecteur a decouvert l'offre
-                    "vu": iso(o.get("posted")) or ts, "maj": ts, "delta": ""}
+        if offres:
+            meilleur = offres[0]["price"]
+            total = sum(o["quantity"] for o in offres)
+            prof = sum(o["quantity"] for o in offres
+                       if o["price"] <= meilleur * 1.05)
+            a = agg.get((h, kind, q))
+            if a is None:
+                a = agg[(h, kind, q)] = {"o": meilleur, "h": meilleur,
+                                         "b": meilleur, "c": meilleur, "n": 0,
+                                         "qte": 0.0, "prof": None, "vendu": 0.0,
+                                         "disparu": 0.0, "repose": 0.0,
+                                         "retire": 0.0}
+            a["h"] = max(a["h"], meilleur)
+            a["b"] = min(a["b"], meilleur)
+            a["c"] = meilleur
+            a["n"] = len(offres)
+            a["qte"] = total
+            a["prof"] = prof
+        elif (h, kind, q) not in agg:
+            continue          # rien en vente et rien a comparer
+
+        # --- le front : la premiere offre restee intacte ---------------
+        front = float("inf")
+        for oid in anciens_par_q.get(q, []):
+            av = ordres[oid]
+            x = neuf.get(oid)
+            if x is not None and float(x["quantity"]) == av["qt"]:
+                front = min(front, av["p"])
+
+        # --- les offres que ce vendeur vient de reposer ----------------
+        # Un vendeur ne peut pas modifier le prix d'une offre : il la retire
+        # et en repose une autre, avec un nouveau numero. Vu du carnet, c'est
+        # une disparition suivie d'une apparition. Si le meme vendeur
+        # reapparait au meme instant sur la meme qualite, c'est presque
+        # surement ca — pas une vente.
+        connus = set(ordres)
+        neufs_par_vendeur = {}
+        for x in offres:
+            if str(x["id"]) in connus:
                 continue
+            v = str((x.get("seller") or {}).get("id", ""))
+            if v:
+                neufs_par_vendeur.setdefault(v, []).append(float(x["quantity"]))
+
+        # --- ce qui a bouge -------------------------------------------
+        for oid in anciens_par_q.get(q, []):
+            av = ordres[oid]
+            x = neuf.get(oid)
+            if x is None:
+                # offre entierement disparue
+                ordres.pop(oid, None)
+                if av["p"] <= front + 1e-9:
+                    # elle etait dans le bloc balaye par un achat : vendue,
+                    # meme si son vendeur a repose juste apres (il a ecoule
+                    # son stock puis remis en vente ce qu'il vient de produire)
+                    vendre(av["qt"], av["p"], kind, q, h, agg, volp, certain=False)
+                    continue
+                # au-dessus du front : aucun acheteur n'aurait pu la prendre.
+                # Reste a savoir si son vendeur l'a simplement reprisee.
+                b = agg.get((h, kind, q))
+                if b is None:
+                    continue
+                reposees = neufs_par_vendeur.get(av["sid"])
+                if reposees:
+                    reposees.pop()
+                    b["repose"] += av["qt"]
+                else:
+                    b["retire"] += av["qt"]
+                continue
+            qt = float(x["quantity"])
             delta = av["qt"] - qt
             if delta > 0:
-                # une offre ne peut pas etre reduite par son vendeur :
-                # une baisse partielle est toujours une vente
-                vendre(delta, av["p"], kind, q, h, agg, volp)
-            if delta != 0 or p != av["p"]:
-                av["maj"] = ts
+                # un vendeur ne peut pas reduire son offre : c'est une vente
+                vendre(delta, av["p"], kind, q, h, agg, volp, certain=True)
+            av["passage"] = ts
             av["delta"] = -delta if delta else ""
             av["qt"] = qt
-            av["p"] = p
-            av["q"] = q
+            av["p"] = float(x["price"])
 
-    # les ordres de cette ressource qui ne sont plus la
-    meilleurs = {q: min(o["price"] for o in offres)
-                 for q, offres in par_q.items()}
-    for oid in [o for o, v in ordres.items()
-                if v["kind"] == kind and o not in vus]:
-        v = ordres.pop(oid)
-        mb = meilleurs.get(v["q"])
-        classer_disparition(v["qt"], v["p"], mb, kind, v["q"], h, agg, volp)
+        # --- les offres qu'on ne connaissait pas -----------------------
+        for x in offres:
+            oid = str(x["id"])
+            if oid in ordres:
+                continue
+            ordres[oid] = {
+                "kind": kind, "q": q,
+                "sid": str((x.get("seller") or {}).get("id", "")),
+                "p": float(x["price"]), "qt": float(x["quantity"]),
+                # la vraie date de mise en vente, donnee par le jeu
+                "depuis": iso(x.get("posted")) or ts, "passage": ts, "delta": ""}
 
 
-def vendre(qte, prix, kind, q, h, agg, volp):
-    """Une vente : on l'ajoute au total de l'heure ET au palier de prix."""
+def vendre(qte, prix, kind, q, h, agg, volp, certain=True):
+    """certain=True : baisse partielle, c'est une vente mesuree.
+       certain=False : offre disparue, c'est une vente deduite."""
     a = agg.get((h, kind, q))
     if a is None:
         return
-    a["vendu"] += qte
-    e = volp.setdefault((h, kind, q, round(prix, 4)), [0.0, 0])
-    e[0] += qte
-    e[1] += 1
-
-
-def classer_disparition(qte, prix, meilleur_restant, kind, q, h, agg, volp):
-    """Une offre entiere a disparu. Au meilleur prix ou en dessous : plus
-    personne n'aurait achete ailleurs, c'est une vente. Plus chere qu'une
-    offre encore presente : le vendeur l'a retiree."""
-    if meilleur_restant is None or prix <= meilleur_restant + 1e-9:
-        vendre(qte, prix, kind, q, h, agg, volp)
-    else:
-        a = agg.get((h, kind, q))
-        if a is not None:
-            a["retire"] += qte
+    a["vendu" if certain else "disparu"] += qte
+    e = volp.setdefault((h, kind, q, round(prix, 4)), [0.0, 0.0, 0])
+    e[0 if certain else 1] += qte
+    e[2] += 1
 
 
 def lignes_horaire(agg, heures=None):
@@ -338,16 +443,17 @@ def lignes_horaire(agg, heures=None):
             continue
         out.append([h, k, q, a["o"], a["h"], a["b"], a["c"], a["n"],
                     round(a["qte"]), round(a["prof"]) if a["prof"] is not None else "",
-                    round(a["vendu"]), round(a["retire"])])
+                    round(a["vendu"]), round(a["disparu"]), round(a["repose"]),
+                    round(a["retire"])])
     return out
 
 
 def lignes_volume(volp, heures=None):
     out = []
-    for (h, k, q, p), (v, n) in sorted(volp.items()):
+    for (h, k, q, p), (v, d, n) in sorted(volp.items()):
         if heures is not None and h not in heures:
             continue
-        out.append([h, k, q, p, round(v), n])
+        out.append([h, k, q, p, round(v), round(d), n])
     return out
 
 
@@ -355,7 +461,7 @@ def lignes_ordres(ordres):
     out = []
     for oid, v in ordres.items():
         out.append([v["kind"], v["q"], oid, v["sid"], v["p"], round(v["qt"]),
-                    v.get("delta", ""), v["vu"], v["maj"]])
+                    v.get("delta", ""), v["depuis"], v["passage"]])
     # tri stable : deux versions successives du fichier se ressemblent au
     # maximum, ce qui garde l'envoi leger
     out.sort(key=lambda r: (r[0], r[1], r[4], r[2]))
@@ -408,12 +514,12 @@ def fermer_et_envoyer(ordres, agg, volp, final=False):
         for h in finies:
             mois = h[:7]
             ajouter_main(f"data/horaire/{mois}.csv", EN_HORAIRE,
-                         lignes_horaire(agg, {h}))
+                         lignes_horaire(agg, {h}), {h})
             par_res = {}
             for l in lignes_volume(volp, {h}):
                 par_res.setdefault(l[1], []).append(l)
             for k, l in par_res.items():
-                ajouter_main(f"data/volume/{k}/{mois}.csv", EN_VOLUME, l)
+                ajouter_main(f"data/volume/{k}/{mois}.csv", EN_VOLUME, l, {h})
         for cle in [c for c in agg if c[0] in finies]:
             del agg[cle]
         for cle in [c for c in volp if c[0] in finies]:

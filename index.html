@@ -135,11 +135,12 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
   <h2>A quel prix vendre</h2>
   <p class="h" id="h_dem">La courbe de demande : combien le marche absorbe par jour selon le prix ou tu te places.</p>
   <div class="calc">
-    <div><label for="i_prod">Ta production (u/jour)</label><input id="i_prod" type="number" step="500" value="34251"></div>
+    <div><label for="i_prod">Ta production (u/jour)</label><input id="i_prod" type="number" step="500" value="0" placeholder="0"></div>
     <div><label for="i_frais">Frais de bourse (%)</label><input id="i_frais" type="number" step="0.1" value="4"></div>
     <div><label for="i_tr">Transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"><div class="frais" id="tr_marche" style="margin:3px 0 0"></div></div>
     <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
   </div>
+  <div class="qbox" style="margin:2px 0 12px"><label id="l_dsp"><input type="checkbox" id="i_dsp"> inclure les offres entierement disparues (deduction, pas mesure)</label></div>
   <div class="note" id="n_dem"></div>
   <h3 style="font-size:13px;margin:16px 0 2px;font-weight:600">Ce qui s'est echange, prix par prix</h3>
   <p class="h" id="h_vol">Les ventes observees a chaque palier de prix.</p>
@@ -286,7 +287,8 @@ async function demarrer() {
 
   ORDRES = csv(tOrdres).map(r => ({
     k: +r.kind, q: +r.quality, id: r.order_id, sid: r.seller_id,
-    p: num(r.price), qt: num(r.qty), d: num(r.delta), vu: r.vu, maj: r.maj
+    p: num(r.price), qt: num(r.qty), d: num(r.delta),
+    depuis: r.depuis || r.vu, passage: r.passage || r.maj
   })).filter(o => o.p != null && o.qt != null);
 
   const hist = [];
@@ -307,6 +309,7 @@ async function demarrer() {
       h: r.heure, o: num(r.ouverture), hi: num(r.haut), lo: num(r.bas),
       c: num(r.cloture), n: num(r.n_ordres), qte: num(r.qte_totale),
       prof: num(r.profondeur_5pct), vendu: num(r.vendu) || 0,
+      disparu: num(r.disparu) || 0, repose: num(r.repose) || 0,
       retire: num(r.retire) || 0
     });
   }
@@ -327,7 +330,7 @@ async function demarrer() {
   }
   sel.value = kinds.includes(146) ? "146" : String(kinds[0]);
 
-  const maj = ORDRES.reduce((m, o) => o.maj > m ? o.maj : m, "");
+  const maj = ORDRES.reduce((m, o) => o.passage > m ? o.passage : m, "");
   AGE = maj ? (d => d === "a l'instant" ? d : "il y a " + d)
     (duree(Date.now() - new Date(maj).getTime())) : "";
   // une "heure d'historique" = une heure de marche, pas une ligne de fichier
@@ -342,7 +345,7 @@ async function demarrer() {
   document.getElementById("foot").textContent =
     "Le carnet est reecrit toutes les 5 minutes. L'historique est fige heure par heure.";
 
-  ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod"]
+  ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod", "i_dsp"]
     .forEach(id => document.getElementById(id)
       .addEventListener("change", id === "res" ? changerRessource : dessine));
   document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
@@ -390,7 +393,8 @@ async function changerRessource() {
     tv.filter(Boolean).forEach(t => VOLUME.push(...csv(t)));
     csv(th).filter(r => r.kind == k).forEach(r => VOLUME.push(r));
     VOLUME = VOLUME.map(r => ({h: r.heure, q: +r.quality, p: num(r.prix),
-                               v: num(r.vendu) || 0, n: num(r.n_evt) || 0}))
+                               v: num(r.vendu) || 0, d: num(r.disparu) || 0,
+                               n: num(r.n_evt) || 0}))
                    .filter(r => r.p != null);
   }
   dessine();
@@ -486,13 +490,15 @@ function fusion(k, qs, depuis) {
   for (const q of qs) for (const p of serieQ(k, q)) {
     if (depuis && p.h < depuis) continue;
     let a = m.get(p.h);
-    if (!a) m.set(p.h, a = {h: p.h, o: null, hi: null, lo: null, c: null,
-                            n: 0, qte: 0, prof: null, vendu: 0, retire: 0});
+    if (!a) m.set(p.h, a = {h: p.h, o: null, hi: null, lo: null, c: null, n: 0,
+                            qte: 0, prof: null, vendu: 0, disparu: 0,
+                            repose: 0, retire: 0});
     a.o = mn(a.o, p.o); a.hi = mn(a.hi, p.hi);
     a.lo = mn(a.lo, p.lo); a.c = mn(a.c, p.c);
     a.n += p.n || 0; a.qte += p.qte || 0;
     if (p.prof != null) a.prof = (a.prof || 0) + p.prof;
-    a.vendu += p.vendu; a.retire += p.retire;
+    a.vendu += p.vendu; a.disparu += p.disparu;
+    a.repose += p.repose; a.retire += p.retire;
   }
   return [...m.values()].sort((a, b) => a.h < b.h ? -1 : 1);
 }
@@ -552,6 +558,7 @@ function kpis(pts, carnet, qs) {
     : null;
   const recents = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24);
   const v24 = recents.reduce((s, p) => s + p.vendu, 0);
+  const d24 = recents.reduce((s, p) => s + p.disparu, 0);
   const r24 = recents.reduce((s, p) => s + p.retire, 0);
   const bas = avecPrix.length ? Math.min(...avecPrix.map(p => p.lo ?? p.c)) : null;
   const haut = avecPrix.length ? Math.max(...avecPrix.map(p => p.hi ?? p.c)) : null;
@@ -568,8 +575,8 @@ function kpis(pts, carnet, qs) {
     ["Profondeur a -5 %", prof != null ? ent(prof) + " u" : "—",
       carnet.length + " offres sur " + qs.length + " qualite(s)"],
     ["Vendu sur 24 h", v24 ? ent(v24) + " u" : "—",
-      r24 ? ent(r24) + " u retirees par leurs vendeurs"
-          : (v24 ? "aucun retrait observe" : "se remplit avec le temps")]
+      d24 ? ent(d24) + " u de plus en offres disparues" :
+      (v24 ? "ventes mesurees" : "se remplit avec le temps")]
   ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
     b + '</div><div class="n">' + c + '</div></div>').join("");
 }
@@ -580,6 +587,8 @@ function kpis(pts, carnet, qs) {
    donc du prix le plus haut vers le plus bas. --------------------------- */
 function demande(qs, depuis, carnet, pts) {
   const elD = document.getElementById("c_dem"), elR = document.getElementById("c_rev");
+  const avecDsp = document.getElementById("i_dsp").checked;
+  document.getElementById("l_dsp").classList.toggle("on", avecDsp);
   const ventes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
 
   // Le debit se divise par les heures REELLEMENT OBSERVEES, pas par les heures
@@ -588,7 +597,12 @@ function demande(qs, depuis, carnet, pts) {
   const jours = Math.max(observees / 24, 1 / 24);
 
   const par = new Map();
-  for (const r of ventes) par.set(r.p, (par.get(r.p) || 0) + r.v);
+  let mes = 0, ded = 0;
+  for (const r of ventes) {
+    mes += r.v; ded += r.d;
+    const v = r.v + (avecDsp ? r.d : 0);
+    if (v > 0) par.set(r.p, (par.get(r.p) || 0) + v);
+  }
   const paliers = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
   const total = paliers.reduce((s2, x) => s2 + x.v, 0);
 
@@ -600,39 +614,11 @@ function demande(qs, depuis, carnet, pts) {
   const x0 = bornes.length ? Math.min(...bornes) : 0;
   const x1 = bornes.length ? Math.max(...bornes) : 1;
 
-  volumeParPrix(paliers, total, observees);
+  document.getElementById("l_dsp").lastChild.textContent =
+    " inclure les offres entierement disparues : " + ent(ded) +
+    " u deduites, contre " + ent(mes) + " u mesurees";
 
-  if (!paliers.length || x1 <= x0) {
-    document.getElementById("n_dem").innerHTML =
-      "Pas encore assez de ventes enregistrees pour tracer la demande. " +
-      "Reviens quand la collecte aura tourne quelques heures de plus.";
-    elD.innerHTML = ""; elR.innerHTML = ""; return;
-  }
-
-  // absorbe(P) = tout ce qui s'est vendu a P ou plus cher
-  const absorbe = P => {
-    let s2 = 0;
-    for (const x of paliers) if (x.p >= P - 1e-9) s2 += x.v;
-    return s2 / jours;
-  };
-
-  const N = 160, grille2 = [];
-  for (let i = 0; i < N; i++) {
-    const p = x0 + i / (N - 1) * (x1 - x0);
-    grille2.push({p, q: absorbe(p)});
-  }
-
-  const frais = +document.getElementById("i_frais").value / 100;
-  const ptr = +document.getElementById("i_tr").value;
-  const tru = +document.getElementById("i_tru").value;
-  const prod = +document.getElementById("i_prod").value || 0;
-  const netC = p => p - ptr * tru * 0.5;
-
-  const tient = grille2.filter(x => x.q >= prod);
-  const prixTout = tient.length ? tient[tient.length - 1].p : null;
-  const rev = grille2.map(x => ({p: x.p, r: Math.min(x.q, prod || x.q) * netC(x.p)}));
-  const best = rev.reduce((a, b) => b.r > a.r ? b : a);
-  const meilleur = carnet.length ? carnet[0].p : null;
+  volumeParPrix(paliers, total, x0, x1, avecDsp);
 
   const base = observees < 24 ? observees + " heures observees"
              : fmt(jours, 1) + " jours observes";
@@ -641,33 +627,73 @@ function demande(qs, depuis, carnet, pts) {
     "ca te laisse une fois les frais payes. Sur " + base + ", de " + prix(x0) +
     " a " + prix(x1) + " $.";
 
+  if (!paliers.length || x1 <= x0) {
+    document.getElementById("n_dem").innerHTML =
+      "Pas encore assez de ventes enregistrees pour tracer la demande.";
+    elD.innerHTML = ""; elR.innerHTML = ""; return;
+  }
+
+  const absorbe = P => {
+    let s2 = 0;
+    for (const x of paliers) if (x.p >= P - 1e-9) s2 += x.v;
+    return s2 / jours;
+  };
+  const N = 160, courbe = [];
+  for (let i = 0; i < N; i++) {
+    const p = x0 + i / (N - 1) * (x1 - x0);
+    courbe.push({p, q: absorbe(p)});
+  }
+
+  const frais = +document.getElementById("i_frais").value / 100;
+  const ptr = +document.getElementById("i_tr").value;
+  const tru = +document.getElementById("i_tru").value;
+  const prod = +document.getElementById("i_prod").value || 0;
+  const netC = p => p - ptr * tru * 0.5;
+  const netB = p => p * (1 - frais) - ptr * tru;
+
+  const tient = courbe.filter(x => x.q >= prod);
+  const prixTout = prod > 0 && tient.length ? tient[tient.length - 1].p : null;
+  const rev = courbe.map(x => ({p: x.p, r: (prod ? Math.min(x.q, prod) : x.q) * netC(x.p)}));
+  const best = rev.reduce((a, b) => b.r > a.r ? b : a);
+  const meilleur = carnet.length ? carnet[0].p : null;
+
   document.getElementById("n_dem").innerHTML =
-    (prixTout
-      ? "Le prix le plus haut auquel <b>toute ta production part</b> : <b>" +
-        prix(prixTout) + " $</b>."
-      : "<b>La bourse n'absorbe pas " + ent(prod) + " u/jour</b> : meme au prix le " +
-        "plus bas de la periode elle n'en prend que " + ent(grille2[0].q) + " u/jour.") +
+    (prod <= 0
+      ? "Renseigne <b>ta production</b> ci-dessus pour savoir jusqu'ou tu peux " +
+        "monter le prix en ecoulant tout. Sans elle, le calcul suppose que tu " +
+        "peux fournir tout ce que le marche demande."
+      : prixTout
+        ? "Le prix le plus haut auquel <b>tes " + ent(prod) + " u/jour partent</b> : <b>" +
+          prix(prixTout) + " $</b>."
+        : "<b>La bourse n'absorbe pas " + ent(prod) + " u/jour</b> : meme au prix le " +
+          "plus bas de la periode elle n'en prend que " + ent(courbe[0].q) + " u/jour.") +
     " Le prix qui <b>rapporte le plus</b> : <b>" + prix(best.p) + " $</b>, soit " +
-    ent(best.r) + " $ par jour en contrat." +
-    (meilleur ? " Le marche est actuellement a <b>" + prix(meilleur) + " $</b>." : "") +
+    ent(best.r) + " $/jour nets en contrat (prix moins " +
+    fmt(ptr * tru * 0.5, 4) + " $ de transport) — " + ent(best.r / netC(best.p)) +
+    " u/jour a " + prix(best.p) + " $." +
+    (meilleur ? " Le marche est actuellement a <b>" + prix(meilleur) + " $</b>, " +
+      "soit " + fmt(netC(meilleur), 4) + " $ nets en contrat et " +
+      fmt(netB(meilleur), 4) + " $ en bourse." : "") +
     (observees < 24 ? ' <span class="dim">Moins d\'une journee de recul : ces ' +
       "chiffres bougeront encore beaucoup.</span>" : "");
 
-  courbeXY(elD, "dem", grille2, x => x.p, x => x.q, prix, ent,
+  courbeXY(elD, "dem", courbe, x => x.p, x => x.q, prix, ent,
     "u/jour absorbees", prod || null, "ta production",
-    i => "A <b>" + prix(grille2[i].p) + " $</b><br>la bourse prend <b>" +
-         ent(grille2[i].q) + " u/jour</b>");
+    i => "A <b>" + prix(courbe[i].p) + " $</b><br>la bourse prend <b>" +
+         ent(courbe[i].q) + " u/jour</b>", null, x0, x1);
   courbeXY(elR, "rev", rev, x => x.p, x => x.r, prix, ent,
     "$/jour nets", null, null,
     i => "A <b>" + prix(rev[i].p) + " $</b><br><b>" + ent(rev[i].r) + " $/jour</b> nets",
-    best);
+    best, x0, x1);
 }
 
 // Une courbe sur une echelle de prix reelle (pas un simple rang).
-function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, info, marque) {
+function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, info,
+                  marque, bx0, bx1) {
   const lh = 200, lw = W - M.l - M.r;
   const xs = pts.map(fx), ys = pts.map(fy);
-  const x0 = Math.min(...xs), x1 = Math.max(...xs);
+  const x0 = bx0 != null ? bx0 : Math.min(...xs);
+  const x1 = bx1 != null ? bx1 : Math.max(...xs);
   const ymax = Math.max(...ys, seuil || 0);
   const y = echelle(0, ymax, lh);
   const X = v => x1 === x0 ? lw / 2 : (v - x0) / (x1 - x0) * lw;
@@ -715,49 +741,64 @@ function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, inf
 }
 
 /* --- LE graphique : le volume echange a chaque prix --- */
-function volumeParPrix(pts, total, observees) {
+function volumeParPrix(pts, total, x0, x1, avecDsp) {
   const el = document.getElementById("c_vol");
   document.getElementById("h_vol").textContent = pts.length
-    ? ent(total) + " unites ont change de mains sur la periode. Les baisses de " +
-      "quantite sont des ventes certaines ; une offre disparue n'est comptee que " +
-      "si elle etait la moins chere."
+    ? ent(total) + " unites ont change de mains sur la periode" +
+      (avecDsp ? ", offres disparues comprises" : " (ventes mesurees seules)") +
+      ". Chaque barre est posee a son prix reel : les trous sont des prix ou " +
+      "rien ne s'est echange."
     : "Aucune vente enregistree sur cette periode pour les qualites cochees.";
-  if (!pts.length) { el.innerHTML = vide("Pas encore de vente observee."); return; }
+  if (!pts.length || x1 <= x0) { el.innerHTML = vide("Pas encore de vente observee."); return; }
 
   const lh = 180, lw = W - M.l - M.r;
   const max = Math.max(...pts.map(x => x.v));
   const y = echelle(0, max, lh);
-  const bw = lw / pts.length;
-  const large = Math.min(bw - 4, 58);
-  const dec = (bw - large) / 2;
+  const X = v => (v - x0) / (x1 - x0) * lw;
+  // largeur : l'ecart le plus serre entre deux paliers, plafonne
+  let ecart = lw;
+  for (let i = 1; i < pts.length; i++) ecart = Math.min(ecart, X(pts[i].p) - X(pts[i - 1].p));
+  const large = Math.max(3, Math.min(ecart - 3, 46, lw / 6));
   const gros = pts.reduce((a, b) => b.v > a.v ? b : a);
-  const iGros = pts.indexOf(gros);
 
-  const n = Math.min(9, pts.length), ax = [];
-  for (let j = 0; j < n; j++) {
-    const i = Math.round(j / (n - 1 || 1) * (pts.length - 1));
-    ax.push('<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' +
-      (lh + 17) + '">' + prix(pts[i].p) + '</text>');
+  const n = Math.min(8, 200), ax = [];
+  for (let j = 0; j < 8; j++) {
+    const v = x0 + j / 7 * (x1 - x0);
+    ax.push('<text class="tk m" x="' + X(v).toFixed(1) + '" y="' + (lh + 17) + '">' +
+      prix(v) + '</text>');
   }
 
   el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
     grille(ticks(0, max, 4), y, 0, lw) +
-    pts.map((d, i) => '<rect x="' + (i * bw + dec).toFixed(1) + '" y="' +
-      y(d.v).toFixed(1) + '" width="' + Math.max(large, 1).toFixed(1) + '" height="' +
-      Math.max(y(0) - y(d.v), 1).toFixed(1) + '" rx="3" fill="var(--s1)" opacity="' +
+    pts.map(d => '<rect x="' + (X(d.p) - large / 2).toFixed(1) + '" y="' +
+      y(d.v).toFixed(1) + '" width="' + large.toFixed(1) + '" height="' +
+      Math.max(y(0) - y(d.v), 1).toFixed(1) + '" rx="2" fill="var(--s1)" opacity="' +
       (d === gros ? "1" : ".82") + '"/>').join("") +
-    '<text class="lbl" text-anchor="middle" x="' + (iGros * bw + bw / 2).toFixed(1) +
+    '<text class="lbl" text-anchor="middle" x="' + X(gros.p).toFixed(1) +
     '" y="' + (y(gros.v) - 8).toFixed(1) + '">' + ent(gros.v) + " u a " +
     prix(gros.p) + ' $</text>' +
     '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' +
     y(0).toFixed(1) + '"/>' + ax.join("") +
-    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">prix auquel la vente s\'est faite ($)</text>' +
+    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) +
+    '">prix auquel la vente s\'est faite ($)</text>' +
     '<rect x="0" y="0" width="' + lw + '" height="' + lh +
     '" fill="transparent" id="hit_vol"/></g>', lh + M.t + M.b + 16);
 
-  survol(el, "vol", pts, lw, i => "<b>" + ent(pts[i].v) + " u</b> a " +
-    prix(pts[i].p) + " $<br><span class=\"dim\">" + fmt(pts[i].v / total * 100, 1) +
-    " % du volume</span>");
+  const posX = pts.map(d => X(d.p));
+  const hit = el.querySelector("#hit_vol"), tip = document.getElementById("t_vol");
+  hit.addEventListener("mousemove", e => {
+    const r = hit.getBoundingClientRect();
+    const px = (e.clientX - r.left) / r.width * lw;
+    let best = 0;
+    posX.forEach((v, i) => { if (Math.abs(v - px) < Math.abs(posX[best] - px)) best = i; });
+    tip.innerHTML = "<b>" + ent(pts[best].v) + " u</b> a " + prix(pts[best].p) +
+      ' $<br><span class="dim">' + fmt(pts[best].v / total * 100, 1) + " % du volume</span>";
+    tip.style.opacity = "1";
+    const c = el.parentElement.getBoundingClientRect();
+    tip.style.left = Math.min(c.width - 180, Math.max(8, e.clientX - c.left + 12)) + "px";
+    tip.style.top = (e.clientY - c.top - 6) + "px";
+  });
+  hit.addEventListener("mouseleave", () => tip.style.opacity = "0");
 }
 
 /* --- prix : une courbe si une seule qualite, une par qualite sinon --- */
@@ -942,9 +983,20 @@ function echelleQualite(k) {
 
 function tableCarnet(carnet) {
   const t = document.getElementById("t_carnet");
-  document.getElementById("h_carnet").textContent = carnet.length
-    ? carnet.length + " offres en vente, mises a jour " + AGE +
-      ". La colonne variation montre ce qui est parti depuis le passage precedent."
+  // une offre non revue depuis longtemps signale une ressource que le jeu ne
+  // nous laisse plus lire : mieux vaut le dire que d'afficher un carnet perime
+  const dernier = ORDRES.reduce((m, o) => o.passage > m ? o.passage : m, "");
+  const vu = carnet.length ? carnet.reduce((m, o) => o.passage > m ? o.passage : m, "") : "";
+  const retard = vu ? new Date(dernier).getTime() - new Date(vu).getTime() : 0;
+  document.getElementById("h_carnet").innerHTML = carnet.length
+    ? carnet.length + " offres en vente, relevees " +
+      duree(Date.now() - new Date(vu).getTime()) + " apres leur mise en ligne. " +
+      "La colonne variation montre ce qui est parti depuis le passage precedent." +
+      (retard > 20 * 60000
+        ? ' <span class="err">Attention : cette ressource n\'a pas ete relue depuis ' +
+          duree(retard) + " — le jeu nous a peut-etre refuse l'acces. Ces prix " +
+          "peuvent etre perimes.</span>"
+        : "")
     : "Aucune offre en vente pour ce niveau de qualite.";
   const l = carnet.slice(0, 15);
   t.innerHTML = '<tr><th>Prix</th><th>Qualite</th><th>Quantite</th><th>Variation</th>' +
@@ -954,7 +1006,7 @@ function tableCarnet(carnet) {
         (o.q === 0 ? "0" : o.q + "\u2605") + '</td><td>' + ent(o.qt) + '</td><td>' +
         (o.d ? '<span class="down">' + ent(o.d) + "</span>" : '<span class="dim">—</span>') +
         '</td><td class="dim">' + o.sid + '</td><td>' +
-        duree(Date.now() - new Date(o.vu).getTime()) + '</td></tr>';
+        duree(Date.now() - new Date(o.depuis).getTime()) + '</td></tr>';
     }).join("") : '<tr><td colspan="6" class="dim">Rien a afficher.</td></tr>');
 }
 
@@ -988,15 +1040,18 @@ function tableau(pts) {
   const p = pts.slice(-24).reverse();
   document.getElementById("t_tab").innerHTML =
     '<tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th><th>Cloture</th>' +
-    '<th>Offres</th><th>Vendu</th><th>Retire</th><th>Profondeur -5 %</th></tr>' +
+    '<th>Offres</th><th>Vendu</th><th>Disparu</th><th>Repose</th><th>Retire</th>' +
+    '<th>Profondeur -5 %</th></tr>' +
     (p.length ? p.map(d => '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" +
       prix(d.o) + "</td><td>" + prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" +
       prix(d.c) + "</td><td>" + (d.n ?? "—") + "</td><td>" +
       (d.vendu ? ent(d.vendu) : '<span class="dim">—</span>') + "</td><td>" +
+      (d.disparu ? ent(d.disparu) : '<span class="dim">—</span>') + "</td><td>" +
+      (d.repose ? ent(d.repose) : '<span class="dim">—</span>') + "</td><td>" +
       (d.retire ? ent(d.retire) : '<span class="dim">—</span>') + "</td><td>" +
       (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') +
       "</td></tr>").join("") :
-      '<tr><td colspan="9" class="dim">Rien a afficher.</td></tr>');
+      '<tr><td colspan="11" class="dim">Rien a afficher.</td></tr>');
 }
 
 demarrer();
