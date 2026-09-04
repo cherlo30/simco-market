@@ -1,0 +1,57 @@
+name: collecte
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 */3 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collecte
+  cancel-in-progress: false
+
+jobs:
+  collecte:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: preparer git
+        run: |
+          git config user.name  "market-bot"
+          git config user.email "market-bot@users.noreply.github.com"
+
+      - name: collecter
+        run: python3 collect.py
+        env:
+          DUREE_MIN: "330"
+          DELAY: "0.8"
+          TICKER_SEC: "30"
+
+      - name: synthese et purge
+        if: always()
+        run: python3 rollup.py
+
+      - name: enregistrer
+        if: always()
+        run: |
+          git add data
+          git diff --staged --quiet && echo "rien de neuf" && exit 0
+          git commit -m "collecte $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" && git push && exit 0
+            sleep $((RANDOM % 10 + 5))
+          done
+          exit 1
+
+      - name: relancer le suivant
+        if: always()
+        run: |
+          curl -sS -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.PAT }}" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/loop.yml/dispatches \
+            -d '{"ref":"${{ github.ref_name }}"}'
