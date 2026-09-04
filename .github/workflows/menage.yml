@@ -31,6 +31,7 @@ jobs:
 
       - name: effacer ce qui ne sert plus
         run: |
+          rm -rf data/flow
           rm -f rollup.py analyse.py convertir.py
           rm -f .github/workflows/ticker.yml
           rm -f .github/workflows/books.yml
