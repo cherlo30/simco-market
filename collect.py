@@ -524,26 +524,54 @@ def main():
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
           f"~{len(kinds)*(DELAY+0.7)/60:.1f} min")
 
-    dernier_live = 0.0
     tour = 0
+    etat = {"dernier_live": 0.0}
+
+    def passer(k, ordres, agg, volp):
+        """Interroge une ressource. Renvoie False si le jeu l'a refusee."""
+        book = fetch(BOOK % (REALM, k))
+        if book:
+            traiter(k, book, ordres, agg, volp, stamp())
+        time.sleep(DELAY + FREIN[0])
+        if time.time() - etat["dernier_live"] > LIVE_SEC:
+            etat["dernier_live"] = time.time()
+            fermer_et_envoyer(ordres, agg, volp)
+        return bool(book)
+
     while time.time() - debut < DUREE:
         tour += 1
         t0 = time.time()
+        refusees = []
         for k in kinds:
             if time.time() - debut > DUREE:
                 break
-            book = fetch(BOOK % (REALM, k))
-            if book:
-                traiter(k, book, ordres, agg, volp, stamp())
-            time.sleep(DELAY + FREIN[0])
+            if not passer(k, ordres, agg, volp):
+                refusees.append(k)
 
-            if time.time() - dernier_live > LIVE_SEC:
-                dernier_live = time.time()
-                fermer_et_envoyer(ordres, agg, volp)
+        # On ne laisse pas tomber une ressource refusee : on y revient en fin
+        # de tour, apres avoir laisse le serveur souffler. Sans ca, un refus
+        # passager coute un tour entier d'observation sur ce produit — et
+        # tous ses mouvements se retrouvent attribues a l'heure suivante.
+        for essai in (1, 2):
+            if not refusees or time.time() - debut > DUREE:
+                break
+            print(f"  reprise {essai} : {len(refusees)} ressource(s) refusee(s) "
+                  f"— {', '.join(map(str, refusees[:12]))}"
+                  + (" ..." if len(refusees) > 12 else ""))
+            time.sleep(min(10 + 10 * essai, 30))
+            restantes = []
+            for k in refusees:
+                if time.time() - debut > DUREE:
+                    restantes.append(k)
+                elif not passer(k, ordres, agg, volp):
+                    restantes.append(k)
+            refusees = restantes
 
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
               f"{len(ordres)} ordres suivis, frein {FREIN[0]:.2f} s, "
-              f"{N429[0]} refus 429")
+              f"{N429[0]} refus 429"
+              + (f", {len(refusees)} ressource(s) toujours inaccessible(s) : "
+                 + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
 
     fermer_et_envoyer(ordres, agg, volp, final=True)
     print(f"{tour} tours effectues")
