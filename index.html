@@ -126,6 +126,12 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 <div class="kpis" id="kpis"></div>
 
 <div class="card">
+  <h2>Prix heure par heure</h2>
+  <p class="h" id="h_prix">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
+  <div id="c_prix"></div><div class="tip" id="t_prix"></div>
+</div>
+
+<div class="card">
   <h2>A quel prix vendre</h2>
   <p class="h" id="h_dem">La courbe de demande : combien le marche absorbe par jour selon le prix ou tu te places.</p>
   <div class="calc">
@@ -135,23 +141,17 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
     <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
   </div>
   <div class="note" id="n_dem"></div>
+  <h3 style="font-size:13px;margin:16px 0 2px;font-weight:600">Ce qui s'est echange, prix par prix</h3>
+  <p class="h" id="h_vol">Les ventes observees a chaque palier de prix.</p>
+  <div id="c_vol"></div><div class="tip" id="t_vol"></div>
+  <h3 style="font-size:13px;margin:18px 0 2px;font-weight:600">Ce que le marche absorbe, selon ton prix</h3>
+  <p class="h">Cumul depuis le haut : tout ce qui s'est vendu a ton prix ou plus cher.</p>
   <div id="c_dem"></div><div class="tip" id="t_dem"></div>
-  <h2 style="margin-top:18px">Ce que ca te rapporte par jour</h2>
+  <h3 style="font-size:13px;margin:18px 0 2px;font-weight:600">Ce que ca te rapporte par jour</h3>
   <p class="h">Le volume absorbe multiplie par ce qu'il te reste apres frais et transport, en contrat.</p>
   <div id="c_rev"></div><div class="tip" id="t_rev"></div>
 </div>
 
-<div class="card">
-  <h2>Volume echange, prix par prix</h2>
-  <p class="h" id="h_vol">Combien d'unites sont parties a chaque prix sur la periode. C'est le prix ou le marche accepte vraiment d'acheter.</p>
-  <div id="c_vol"></div><div class="tip" id="t_vol"></div>
-</div>
-
-<div class="card">
-  <h2>Prix heure par heure</h2>
-  <p class="h" id="h_prix">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
-  <div id="c_prix"></div><div class="tip" id="t_prix"></div>
-</div>
 
 <div class="card">
   <h2>Profondeur du carnet a moins de 5 % du meilleur prix</h2>
@@ -527,8 +527,7 @@ function dessine() {
 
   majTransport();
   kpis(pts, carnet, qs);
-  demande(qs, depuis, carnet);
-  volumeParPrix(qs, depuis);
+  demande(qs, depuis, carnet, pts);
   courbePrix(k, qs, depuis, pts);
   courbeProfondeur(pts);
   profilHoraire(toutes);
@@ -579,74 +578,89 @@ function kpis(pts, carnet, qs) {
    Un acheteur prend toujours le moins cher. Donc tout ce qui s'est echange a
    6,60 $ ou PLUS CHER, on l'aurait capte en se placant a 6,60. On cumule
    donc du prix le plus haut vers le plus bas. --------------------------- */
-function demande(qs, depuis, carnet) {
+function demande(qs, depuis, carnet, pts) {
   const elD = document.getElementById("c_dem"), elR = document.getElementById("c_rev");
-  const lignes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
-  const heures = new Set(lignes.map(r => r.h));
-  const jours = Math.max(heures.size / 24, 1 / 24);
+  const ventes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
+
+  // Le debit se divise par les heures REELLEMENT OBSERVEES, pas par les heures
+  // ou il s'est passe quelque chose : une heure calme compte aussi.
+  const observees = pts.length;
+  const jours = Math.max(observees / 24, 1 / 24);
 
   const par = new Map();
-  for (const r of lignes) par.set(r.p, (par.get(r.p) || 0) + r.v);
+  for (const r of ventes) par.set(r.p, (par.get(r.p) || 0) + r.v);
   const paliers = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
+  const total = paliers.reduce((s2, x) => s2 + x.v, 0);
 
-  if (paliers.length < 2) {
-    document.getElementById("h_dem").textContent =
-      "La courbe de demande : combien le marche absorbe par jour selon le prix. " +
-      "Il faut au moins quelques ventes observees pour la tracer.";
-    document.getElementById("n_dem").textContent =
-      "Pas encore assez de ventes enregistrees. Reviens quand la collecte aura " +
-      "tourne une journee complete.";
+  // L'axe couvre TOUTE l'amplitude de prix de la periode, pas seulement les
+  // prix ou une vente a eu lieu : savoir qu'au-dessus de X rien ne part est
+  // une information a part entiere.
+  const cotes = pts.flatMap(p => [p.lo, p.hi, p.c]).filter(v => v != null);
+  const bornes = cotes.concat(paliers.map(x => x.p));
+  const x0 = bornes.length ? Math.min(...bornes) : 0;
+  const x1 = bornes.length ? Math.max(...bornes) : 1;
+
+  volumeParPrix(paliers, total, observees);
+
+  if (!paliers.length || x1 <= x0) {
+    document.getElementById("n_dem").innerHTML =
+      "Pas encore assez de ventes enregistrees pour tracer la demande. " +
+      "Reviens quand la collecte aura tourne quelques heures de plus.";
     elD.innerHTML = ""; elR.innerHTML = ""; return;
   }
 
-  // cumul depuis le prix le plus haut
-  const pts = [];
-  let cum = 0;
-  for (let i = paliers.length - 1; i >= 0; i--) {
-    cum += paliers[i].v;
-    pts.unshift({p: paliers[i].p, q: cum / jours});
+  // absorbe(P) = tout ce qui s'est vendu a P ou plus cher
+  const absorbe = P => {
+    let s2 = 0;
+    for (const x of paliers) if (x.p >= P - 1e-9) s2 += x.v;
+    return s2 / jours;
+  };
+
+  const N = 160, grille2 = [];
+  for (let i = 0; i < N; i++) {
+    const p = x0 + i / (N - 1) * (x1 - x0);
+    grille2.push({p, q: absorbe(p)});
   }
 
   const frais = +document.getElementById("i_frais").value / 100;
   const ptr = +document.getElementById("i_tr").value;
   const tru = +document.getElementById("i_tru").value;
   const prod = +document.getElementById("i_prod").value || 0;
-  const netC = p => p - ptr * tru * 0.5;          // contrat : le canal principal
+  const netC = p => p - ptr * tru * 0.5;
 
-  // le prix le plus haut auquel toute la production part
-  const tient = pts.filter(x => x.q >= prod);
+  const tient = grille2.filter(x => x.q >= prod);
   const prixTout = tient.length ? tient[tient.length - 1].p : null;
-  // le prix qui rapporte le plus par jour
-  const rev = pts.map(x => ({p: x.p, r: Math.min(x.q, prod || x.q) * netC(x.p)}));
+  const rev = grille2.map(x => ({p: x.p, r: Math.min(x.q, prod || x.q) * netC(x.p)}));
   const best = rev.reduce((a, b) => b.r > a.r ? b : a);
   const meilleur = carnet.length ? carnet[0].p : null;
 
+  const base = observees < 24 ? observees + " heures observees"
+             : fmt(jours, 1) + " jours observes";
   document.getElementById("h_dem").textContent =
-    "Combien le marche a absorbe par jour, selon le prix ou tu te places. " +
-    "Lecture : a 6,60 $ figure tout ce qui s'est echange a 6,60 et au-dessus, " +
-    "puisqu'un acheteur prend toujours le moins cher. Base sur " +
-    (heures.size < 24 ? heures.size + " heures observees" : fmt(jours, 1) + " jours") + ".";
+    "Combien le marche absorbe par jour selon le prix ou tu te places, et ce que " +
+    "ca te laisse une fois les frais payes. Sur " + base + ", de " + prix(x0) +
+    " a " + prix(x1) + " $.";
 
   document.getElementById("n_dem").innerHTML =
     (prixTout
       ? "Le prix le plus haut auquel <b>toute ta production part</b> : <b>" +
         prix(prixTout) + " $</b>."
-      : "<b>Le marche n'absorbe pas " + ent(prod) + " u/jour</b> aux prix observes : " +
-        "au plus bas prix releve il n'en prend que " + ent(pts[0].q) + " u/jour.") +
-    " Le prix qui <b>rapporte le plus</b> est <b>" + prix(best.p) + " $</b>, pour " +
+      : "<b>La bourse n'absorbe pas " + ent(prod) + " u/jour</b> : meme au prix le " +
+        "plus bas de la periode elle n'en prend que " + ent(grille2[0].q) + " u/jour.") +
+    " Le prix qui <b>rapporte le plus</b> : <b>" + prix(best.p) + " $</b>, soit " +
     ent(best.r) + " $ par jour en contrat." +
-    (meilleur ? " Le marche est actuellement a " + prix(meilleur) + " $." : "") +
-    (heures.size < 24 ? " <span class=\"dim\">Attention : moins d'une journee de " +
-      "recul, ces chiffres bougeront beaucoup.</span>" : "");
+    (meilleur ? " Le marche est actuellement a <b>" + prix(meilleur) + " $</b>." : "") +
+    (observees < 24 ? ' <span class="dim">Moins d\'une journee de recul : ces ' +
+      "chiffres bougeront encore beaucoup.</span>" : "");
 
-  courbeXY(elD, "dem", pts, x => x.p, x => x.q, prix, ent,
+  courbeXY(elD, "dem", grille2, x => x.p, x => x.q, prix, ent,
     "u/jour absorbees", prod || null, "ta production",
-    i => "A <b>" + prix(pts[i].p) + " $</b><br>le marche prend <b>" +
-         ent(pts[i].q) + " u/jour</b>");
+    i => "A <b>" + prix(grille2[i].p) + " $</b><br>la bourse prend <b>" +
+         ent(grille2[i].q) + " u/jour</b>");
   courbeXY(elR, "rev", rev, x => x.p, x => x.r, prix, ent,
     "$/jour nets", null, null,
-    i => "A <b>" + prix(rev[i].p) + " $</b><br><b>" + ent(rev[i].r) +
-         " $/jour</b> nets" + (rev[i] === best ? " — le maximum" : ""), best);
+    i => "A <b>" + prix(rev[i].p) + " $</b><br><b>" + ent(rev[i].r) + " $/jour</b> nets",
+    best);
 }
 
 // Une courbe sur une echelle de prix reelle (pas un simple rang).
@@ -701,22 +715,16 @@ function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, inf
 }
 
 /* --- LE graphique : le volume echange a chaque prix --- */
-function volumeParPrix(qs, depuis) {
+function volumeParPrix(pts, total, observees) {
   const el = document.getElementById("c_vol");
-  const lignes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
-  const par = new Map();
-  for (const r of lignes) par.set(r.p, (par.get(r.p) || 0) + r.v);
-  const pts = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
-  const total = pts.reduce((s, x) => s + x.v, 0);
-
   document.getElementById("h_vol").textContent = pts.length
-    ? "Combien d'unites sont parties a chaque prix sur la periode : " + ent(total) +
-      " au total. Les baisses de quantite sont des ventes certaines ; les offres " +
-      "disparues ne sont comptees que si elles etaient les moins cheres."
+    ? ent(total) + " unites ont change de mains sur la periode. Les baisses de " +
+      "quantite sont des ventes certaines ; une offre disparue n'est comptee que " +
+      "si elle etait la moins chere."
     : "Aucune vente enregistree sur cette periode pour les qualites cochees.";
   if (!pts.length) { el.innerHTML = vide("Pas encore de vente observee."); return; }
 
-  const lh = 210, lw = W - M.l - M.r;
+  const lh = 180, lw = W - M.l - M.r;
   const max = Math.max(...pts.map(x => x.v));
   const y = echelle(0, max, lh);
   const bw = lw / pts.length;
@@ -743,11 +751,11 @@ function volumeParPrix(qs, depuis) {
     prix(gros.p) + ' $</text>' +
     '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' +
     y(0).toFixed(1) + '"/>' + ax.join("") +
-    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">prix de vente ($)</text>' +
+    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">prix auquel la vente s\'est faite ($)</text>' +
     '<rect x="0" y="0" width="' + lw + '" height="' + lh +
     '" fill="transparent" id="hit_vol"/></g>', lh + M.t + M.b + 16);
 
-  survol(el, "vol", pts, lw, i => "<b>" + ent(pts[i].v) + " u</b> echangees a " +
+  survol(el, "vol", pts, lw, i => "<b>" + ent(pts[i].v) + " u</b> a " +
     prix(pts[i].p) + " $<br><span class=\"dim\">" + fmt(pts[i].v / total * 100, 1) +
     " % du volume</span>");
 }
