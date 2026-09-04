@@ -20,6 +20,21 @@ def heure(ts):
     return ts[:13]          # AAAA-MM-JJTHH
 
 
+def enregistrements(fh):
+    """Lit un CSV en ignorant les lignes qui n'ont pas le bon nombre de
+    colonnes. Un fichier ecrit par deux versions du collecteur en contient :
+    les interpreter avec le mauvais en-tete produirait des prix absurdes."""
+    r = csv.reader(fh)
+    try:
+        entete = next(r)
+    except StopIteration:
+        return
+    n = len(entete)
+    for ligne in r:
+        if len(ligne) == n:
+            yield dict(zip(entete, ligne))
+
+
 def nombre(x):
     """Le jeu ecrit parfois 'sold out' au lieu d'un prix. On l'ignore."""
     try:
@@ -36,14 +51,14 @@ def main():
 
     for f in sorted(glob.glob("data/ticker/*.csv")):
         with open(f) as fh:
-            for r in csv.DictReader(fh):
+            for r in enregistrements(fh):
                 p = nombre(r["price"])
                 if p is not None:
                     prix[(heure(r["ts"]), int(r["kind"]), 0)].append(p)
 
     for f in sorted(glob.glob("data/book/*.csv")):
         with open(f) as fh:
-            for r in csv.DictReader(fh):
+            for r in enregistrements(fh):
                 d = nombre(r.get("qty_within_5pct"))
                 if d is not None:
                     q = int(r.get("quality") or 0)
@@ -54,7 +69,7 @@ def main():
 
     for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
         with gzip.open(f, "rt") as fh:
-            for r in csv.DictReader(fh):
+            for r in enregistrements(fh):
                 if r["evt"] in ("C", "X") and r["reprise"] != "1" and r["delta"]:
                     d = nombre(r["delta"])
                     if d and d > 0:
