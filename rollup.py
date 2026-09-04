@@ -20,6 +20,14 @@ def heure(ts):
     return ts[:13]          # AAAA-MM-JJTHH
 
 
+def nombre(x):
+    """Le jeu ecrit parfois 'sold out' au lieu d'un prix. On l'ignore."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
 def main():
     prix = defaultdict(list)        # (heure, kind, qualite) -> [prix]
     vol = defaultdict(float)        # unites vendues
@@ -29,29 +37,31 @@ def main():
     for f in sorted(glob.glob("data/ticker/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
-                prix[(heure(r["ts"]), int(r["kind"]), 0)].append(float(r["price"]))
+                p = nombre(r["price"])
+                if p is not None:
+                    prix[(heure(r["ts"]), int(r["kind"]), 0)].append(p)
 
     for f in sorted(glob.glob("data/book/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
-                if r.get("qty_within_5pct"):
+                d = nombre(r.get("qty_within_5pct"))
+                if d is not None:
                     q = int(r.get("quality") or 0)
-                    prof[(heure(r["ts"]), int(r["kind"]), q)].append(
-                        float(r["qty_within_5pct"]))
-                    if r.get("best"):
-                        prix[(heure(r["ts"]), int(r["kind"]), q)].append(
-                            float(r["best"]))
+                    prof[(heure(r["ts"]), int(r["kind"]), q)].append(d)
+                    b = nombre(r.get("best"))
+                    if b is not None:
+                        prix[(heure(r["ts"]), int(r["kind"]), q)].append(b)
 
     for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
         with gzip.open(f, "rt") as fh:
             for r in csv.DictReader(fh):
                 if r["evt"] in ("C", "X") and r["reprise"] != "1" and r["delta"]:
-                    d = float(r["delta"])
-                    if d > 0:
+                    d = nombre(r["delta"])
+                    if d and d > 0:
                         k = (heure(r["ts"]), int(r["kind"]),
                              int(r.get("quality") or 0))
                         vol[k] += d
-                        val[k] += d * float(r["price"] or 0)
+                        val[k] += d * (nombre(r["price"]) or 0)
 
     os.makedirs(SORTIE, exist_ok=True)
     par_mois = defaultdict(list)
