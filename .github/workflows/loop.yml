@@ -2,6 +2,11 @@ name: collecte
 
 on:
   workflow_dispatch:
+    inputs:
+      duree:
+        description: "Duree de la collecte en minutes (3 pour tester la chaine)"
+        required: false
+        default: "330"
   schedule:
     - cron: "17 */3 * * *"      # filet de securite si la chaine se casse
 
@@ -30,7 +35,7 @@ jobs:
       - name: collecter
         run: python3 collect.py
         env:
-          DUREE_MIN: "330"
+          DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
           DELAY: "0.8"
           TICKER_SEC: "30"
 
@@ -52,15 +57,18 @@ jobs:
 
       # le temoin passe au coureur suivant.
       # GITHUB_TOKEN ne peut PAS declencher un workflow : il faut le jeton PAT.
+      # Le suivant repart toujours sur la duree normale (330 min), meme si
+      # celui-ci tournait en mode test.
       - name: relancer le suivant
         if: always()
         run: |
           ecoule=$(( $(date +%s) - DEBUT ))
-          if [ "$ecoule" -lt 120 ]; then
+          if [ "$ecoule" -lt 90 ]; then
             echo "La collecte n'a tenu que ${ecoule}s : c'est un plantage, pas une"
             echo "fin de course. On ne relance PAS, pour ne pas boucler a l'infini."
             exit 1
           fi
+          echo "Collecte terminee apres ${ecoule}s. Passage du temoin."
           curl -sS -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.PAT }}" \
