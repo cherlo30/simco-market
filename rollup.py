@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Synthese et purge.
+
+- construit des agregats HORAIRES a partir des prix et des mouvements
+  (ouverture, plus haut, plus bas, cloture, volume echange, profondeur)
+- efface la bande de mouvements de plus de RETENTION jours
+
+Les agregats pesent quelques megaoctets par an : on peut les garder pour
+toujours. La bande brute, elle, ne sert que pour l'analyse fine recente.
+"""
+import csv, glob, gzip, os, statistics, sys, time
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+
+RETENTION = int(os.environ.get("RETENTION_JOURS", "30"))
+SORTIE = "data/hourly"
+
+
+def heure(ts):
+    return ts[:13]          # AAAA-MM-JJTHH
+
+
+def main():
+    prix = defaultdict(list)        # (heure, kind) -> [prix]
+    vol = defaultdict(float)        # (heure, kind) -> unites vendues
+    val = defaultdict(float)        # (heure, kind) -> valeur echangee
+    prof = defaultdict(list)        # (heure, kind) -> [profondeur a -5%]
+
+    for f in sorted(glob.glob("data/ticker/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                prix[(heure(r["ts"]), int(r["kind"]))].append(float(r["price"]))
+
+    for f in sorted(glob.glob("data/book/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if r.get("qty_within_5pct"):
+                    prof[(heure(r["ts"]), int(r["kind"]))].append(
+                        float(r["qty_within_5pct"]))
+
+    for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
+        with gzip.open(f, "rt") as fh:
+            for r in csv.DictReader(fh):
+                if r["evt"] in ("C", "X") and r["reprise"] != "1" and r["delta"]:
+                    d = float(r["delta"])
+                    if d > 0:
+                        k = (heure(r["ts"]), int(r["kind"]))
+                        vol[k] += d
+                        val[k] += d * float(r["price"] or 0)
+
+    os.makedirs(SORTIE, exist_ok=True)
+    par_mois = defaultdict(list)
+    for cle in sorted(set(prix) | set(vol) | set(prof)):
+        h, k = cle
+        p = prix.get(cle) or []
+        par_mois[h[:7]].append([
+            h, k,
+            p[0] if p else "", max(p) if p else "", min(p) if p else "",
+            p[-1] if p else "", len(p),
+            round(vol.get(cle, 0)), round(val.get(cle, 0)),
+            round(statistics.median(prof[cle])) if prof.get(cle) else "",
+        ])
+
+    for mois, lignes in par_mois.items():
+        with open(f"{SORTIE}/{mois}.csv", "w", newline="") as fh:
+            w = csv.writer(fh)
+            w.writerow(["heure", "kind", "ouverture", "haut", "bas", "cloture",
+                        "n_releves", "volume", "valeur", "profondeur_5pct"])
+            w.writerows(lignes)
+        print(f"{SORTIE}/{mois}.csv : {len(lignes)} lignes")
+
+    # purge de la bande ancienne
+    limite = (datetime.now(timezone.utc) - timedelta(days=RETENTION)).strftime("%Y-%m-%d")
+    efface = 0
+    for f in glob.glob("data/tape/*/*.csv.gz"):
+        jour = os.path.basename(f)[:10]
+        if jour < limite:
+            os.remove(f); efface += 1
+    if efface:
+        print(f"{efface} fichier(s) de bande de plus de {RETENTION} jours effaces")
+
+
+if __name__ == "__main__":
+    main()

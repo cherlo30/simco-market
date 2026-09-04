@@ -1,120 +1,140 @@
 #!/usr/bin/env python3
-"""Analyse l'historique collecte.
+"""Analyse de l'historique collecte.
 
-  python3 analyse.py 146            profil de la citrouille
-  python3 analyse.py 146 2 66 13    plusieurs ressources
-
-Sort : profil horaire (UTC), amplitude journaliere, et le prix fixe
-conseille pour un contrat.
+  python3 analyse.py 146              profil horaire de la citrouille
+  python3 analyse.py 146 2 66 13      plusieurs ressources
+  python3 analyse.py 146 --volume     + le volume reellement echange
+  python3 analyse.py --top            les ressources les plus liquides
 """
-import csv, glob, os, statistics, sys
+import csv, glob, gzip, os, statistics, sys
 from collections import defaultdict
 
 NOMS = {146: "Citrouille", 2: "Eau", 66: "Semences", 13: "Transport",
         147: "Jack o'lantern", 149: "Soupe de citrouille", 29: "Recherche vegetale",
-        1: "Energie", 6: "Grain", 72: "Canne a sucre", 40: "Coton"}
+        1: "Energie", 6: "Grain", 72: "Canne a sucre", 40: "Coton", 120: "Legumes",
+        3: "Pommes", 4: "Oranges", 44: "Sable", 106: "Bois"}
 
-FRAIS_BOURSE = 0.04       # 4 % preleves sur une vente a l'echange
-TRANSPORT_PRIX = 0.365    # prix d'une unite de transport
+FRAIS = 0.04            # frais de bourse sur une vente a l'echange
+TRANSPORT = 0.365       # prix d'une unite de transport
 
 
-def charger(kind):
+def nom(k):
+    return NOMS.get(k, f"ressource {k}")
+
+
+def lire_prix(kind):
     pts = []
-    for f in sorted(glob.glob(os.path.join("data", "ticker", "*.csv"))):
+    for f in sorted(glob.glob("data/ticker/*.csv")):
         with open(f) as fh:
             for r in csv.DictReader(fh):
                 if int(r["kind"]) == kind:
                     pts.append((r["ts"], float(r["price"])))
-    return pts
+    for f in sorted(glob.glob("data/hourly/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if int(r["kind"]) == kind and r["cloture"]:
+                    pts.append((r["heure"] + ":30:00Z", float(r["cloture"])))
+    return sorted(set(pts))
 
 
-def analyse(kind, tr=1.0):
-    pts = charger(kind)
-    nom = NOMS.get(kind, f"ressource {kind}")
-    if len(pts) < 12:
-        print(f"\n{nom} : {len(pts)} releves — pas encore assez, reviens dans quelques heures.")
+def profil(kind, tr=1.0):
+    pts = lire_prix(kind)
+    if len(pts) < 8:
+        print(f"\n{nom(kind)} : {len(pts)} releves — reviens dans quelques heures.")
         return
-    print(f"\n{'='*62}\n{nom}  ({len(pts)} releves)\n{'='*62}")
+    print(f"\n{'='*66}\n{nom(kind)}  —  {len(pts)} releves\n{'='*66}")
 
-    par_heure = defaultdict(list)
-    par_jour = defaultdict(list)
+    par_h, par_j = defaultdict(list), defaultdict(list)
     for ts, p in pts:
-        par_heure[int(ts[11:13])].append(p)
-        par_jour[ts[:10]].append(p)
+        par_h[int(ts[11:13])].append(p)
+        par_j[ts[:10]].append(p)
+    med = statistics.median([p for _, p in pts])
 
     print("\nProfil horaire (UTC)")
-    print(f"{'h':>4}{'median':>10}{'min':>9}{'max':>9}{'n':>6}   ecart a la mediane globale")
-    glob_med = statistics.median([p for _, p in pts])
-    for h in sorted(par_heure):
-        v = par_heure[h]
+    print(f"{'h':>4}{'median':>10}{'bas':>9}{'haut':>9}{'n':>6}   ecart")
+    for h in sorted(par_h):
+        v = par_h[h]
         m = statistics.median(v)
-        ecart = (m / glob_med - 1) * 100
-        barre = ("+" if ecart >= 0 else "-") * min(int(abs(ecart) * 4), 30)
-        print(f"{h:>4}{m:>10.3f}{min(v):>9.3f}{max(v):>9.3f}{len(v):>6}   {ecart:+6.2f}% {barre}")
+        e = (m / med - 1) * 100
+        barre = ("+" if e >= 0 else "-") * min(int(abs(e) * 4), 28)
+        print(f"{h:>4}{m:>10.3f}{min(v):>9.3f}{max(v):>9.3f}{len(v):>6}  {e:+6.2f}% {barre}")
 
     print("\nPar jour")
     print(f"{'date':>12}{'bas':>9}{'haut':>9}{'amplitude':>11}{'median':>9}")
-    for d in sorted(par_jour):
-        v = par_jour[d]
-        lo, hi = min(v), max(v)
-        print(f"{d:>12}{lo:>9.3f}{hi:>9.3f}{(hi/lo-1)*100:>10.1f}%{statistics.median(v):>9.3f}")
+    for d in sorted(par_j):
+        v = par_j[d]
+        print(f"{d:>12}{min(v):>9.3f}{max(v):>9.3f}{(max(v)/min(v)-1)*100:>10.1f}%"
+              f"{statistics.median(v):>9.3f}")
 
-    creux = [min(par_jour[d]) for d in par_jour if len(par_jour[d]) >= 12]
+    creux = [min(par_j[d]) for d in par_j if len(par_j[d]) >= 8]
     if creux:
-        ref = min(creux) if len(creux) < 3 else statistics.median(creux)
-        transport_contrat = 0.5 * tr * TRANSPORT_PRIX
-        transport_bourse = tr * TRANSPORT_PRIX
-        for remise in (0.0, 0.01, 0.02, 0.03):
-            prix = round(ref * (1 - remise), 2)
-            net = prix - transport_contrat
-            equiv = (net + transport_bourse) / (1 - FRAIS_BOURSE)
-            print(f"  prix fixe {prix:>7.2f}  -> tu encaisses {net:>7.3f}"
+        ref = statistics.median(creux) if len(creux) >= 3 else min(creux)
+        print(f"\nPrix fixe conseille pour un contrat  (creux journalier median {ref:.3f})")
+        for rem in (0.0, 0.01, 0.02, 0.03):
+            px = round(ref * (1 - rem), 2)
+            net = px - 0.5 * tr * TRANSPORT
+            equiv = (net + tr * TRANSPORT) / (1 - FRAIS)
+            print(f"  {px:>7.2f}  -> tu encaisses {net:>7.3f}"
                   f"   = une vente en bourse a {equiv:>6.2f}")
-        print(f"\n  Reference : creux journalier median = {ref:.3f}")
-        print("  Un prix fixe sous le creux est accepte a n'importe quelle heure.")
 
 
-# ---------------------------------------------------------------- volume
 def volume(kind):
-    """Reconstitue le volume echange en comparant deux photos successives
-    du carnet : un ordre dont la quantite baisse ou qui disparait a ete achete."""
-    import glob, gzip, csv as _csv
-    from collections import defaultdict
-    photos = defaultdict(dict)            # ts -> {order_id: (prix, qte)}
-    for f in sorted(glob.glob("data/flow/*/*.csv.gz")) + sorted(glob.glob("data/flow/*.csv.gz")):
+    par_h = defaultdict(lambda: [0.0, 0.0])
+    for f in sorted(glob.glob("data/tape/*/*.csv.gz")):
         with gzip.open(f, "rt") as fh:
-            for r in _csv.DictReader(fh):
-                if int(r["kind"]) == kind:
-                    photos[r["ts"]][r["order_id"]] = (float(r["price"]), int(r["quantity"]))
-    ts = sorted(photos)
-    if len(ts) < 2:
-        print(f"\n{NOMS.get(kind, kind)} : {len(ts)} photo(s) — il en faut au moins 2.")
+            for r in csv.DictReader(fh):
+                if int(r["kind"]) != kind or r["reprise"] == "1":
+                    continue
+                if r["evt"] in ("C", "X") and r["delta"]:
+                    d = float(r["delta"])
+                    if d > 0:
+                        h = par_h[r["ts"][:13]]
+                        h[0] += d
+                        h[1] += d * float(r["price"] or 0)
+    for f in sorted(glob.glob("data/hourly/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if int(r["kind"]) == kind and r["volume"]:
+                    h = par_h.setdefault(r["heure"], [0.0, 0.0])
+                    if h[0] == 0:
+                        h[0], h[1] = float(r["volume"]), float(r["valeur"] or 0)
+    if not par_h:
+        print(f"\n{nom(kind)} : pas encore de mouvements enregistres.")
         return
-    print(f"\n{'='*62}\nVolume echange — {NOMS.get(kind, kind)}\n{'='*62}")
-    print(f"{'periode':>22}{'unites':>12}{'valeur':>14}{'prix moy':>11}")
-    tot_q = tot_v = 0
-    for a, b in zip(ts, ts[1:]):
-        q = v = 0
-        for oid, (p, qa) in photos[a].items():
-            qb = photos[b].get(oid, (p, 0))[1]
-            if qa > qb:
-                q += qa - qb
-                v += (qa - qb) * p
-        tot_q += q; tot_v += v
-        print(f"{b[11:16]:>22}{q:>12,}{v:>14,.0f}{(v/q if q else 0):>11.3f}")
-    heures = (len(ts) - 1) * 20 / 60.0
-    print(f"\n  total {tot_q:,} unites pour {tot_v:,.0f} $ sur ~{heures:.1f} h")
-    if heures:
-        print(f"  soit {tot_q/heures:,.0f} unites/heure, {tot_q/heures*24:,.0f}/jour")
-        print("  (une baisse de quantite peut aussi etre une annulation : "
-              "chiffre plafond, pas exact)")
+    print(f"\n{'='*66}\nVolume echange — {nom(kind)}\n{'='*66}")
+    print(f"{'heure':>16}{'unites':>12}{'valeur':>14}{'prix moyen':>13}")
+    tq = tv = 0
+    for h in sorted(par_h):
+        q, v = par_h[h]
+        tq += q; tv += v
+        print(f"{h:>16}{q:>12,.0f}{v:>14,.0f}{(v/q if q else 0):>13.3f}")
+    n = len(par_h)
+    print(f"\n  total {tq:,.0f} unites, {tv:,.0f} $ sur {n} heure(s)")
+    print(f"  soit {tq/n:,.0f} unites/heure, {tq/n*24:,.0f}/jour")
+    print("  (une baisse de quantite peut aussi etre une annulation : plafond)")
+
+
+def top():
+    vol = defaultdict(float)
+    for f in sorted(glob.glob("data/hourly/*.csv")):
+        with open(f) as fh:
+            for r in csv.DictReader(fh):
+                if r["valeur"]:
+                    vol[int(r["kind"])] += float(r["valeur"])
+    if not vol:
+        print("pas encore d'agregats horaires — lance rollup.py")
+        return
+    print(f"\n{'='*66}\nRessources les plus echangees (valeur)\n{'='*66}")
+    for k, v in sorted(vol.items(), key=lambda x: -x[1])[:25]:
+        print(f"{nom(k):<22}{v:>16,.0f} $")
 
 
 if __name__ == "__main__":
-    args = [a for a in sys.argv[1:]]
-    vol = "--volume" in args
+    args = sys.argv[1:]
+    if "--top" in args:
+        top(); sys.exit()
     kinds = [int(a) for a in args if a.lstrip("-").isdigit()] or [146]
     for k in kinds:
-        analyse(k, tr=1.0 if k == 146 else 0.1)
-        if vol:
+        profil(k, tr=1.0 if k in (146, 44) else 0.1)
+        if "--volume" in args:
             volume(k)
