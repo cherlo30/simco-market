@@ -166,17 +166,59 @@ def en_csv(entete, lignes):
 
 
 def lire_csv(texte, entete):
-    """Lit un CSV en ignorant les lignes qui n'ont pas le bon nombre de
-    colonnes ou dont l'en-tete a change."""
+    """Lit un CSV en se fiant aux NOMS des colonnes, jamais a leur ordre.
+
+    Avant, un en-tete different faisait tout jeter — donc le jour ou on
+    ajoutait une colonne, le programme perdait sa memoire entiere au
+    redemarrage et repartait de zero. Maintenant il retrouve chaque colonne
+    par son nom ; celles qui n'existaient pas restent vides."""
     if not texte:
         return []
     lignes = texte.strip().split("\n")
-    if not lignes or lignes[0].strip("\r") != ",".join(entete):
+    if len(lignes) < 2:
         return []
+    vieux = [c.strip() for c in lignes[0].strip("\r").split(",")]
     out = []
     for l in csv.reader(lignes[1:]):
-        if len(l) == len(entete):
-            out.append(l)
+        if len(l) != len(vieux):
+            continue
+        d = dict(zip(vieux, l))
+        out.append([d.get(c, "") for c in entete])
+    return out
+
+
+# Comment deux enregistrements de la meme heure se combinent.
+SOMME = {"vendu", "disparu", "repose", "retire", "n_evt"}
+PLUS_HAUT = {"haut"}
+PLUS_BAS = {"bas"}
+PREMIER = {"ouverture"}          # garde la valeur la plus ancienne
+CLES = {"heure", "kind", "quality", "prix"}
+
+
+def combiner(entete, a, b):
+    """a = ce qui etait deja enregistre, b = ce qu'on ajoute."""
+    def nb(x):
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+    out = []
+    for i, col in enumerate(entete):
+        va, vb = a[i], b[i]
+        if col in CLES:
+            out.append(va)
+        elif col in SOMME:
+            out.append(round((nb(va) or 0) + (nb(vb) or 0)))
+        elif col in PLUS_HAUT:
+            xs = [x for x in (nb(va), nb(vb)) if x is not None]
+            out.append(max(xs) if xs else "")
+        elif col in PLUS_BAS:
+            xs = [x for x in (nb(va), nb(vb)) if x is not None]
+            out.append(min(xs) if xs else "")
+        elif col in PREMIER:
+            out.append(va if va != "" else vb)
+        else:
+            out.append(vb if vb != "" else va)     # etat le plus recent
     return out
 
 
@@ -249,15 +291,15 @@ def pousser_live(fichiers):
 def ajouter_main(chemin, entete, lignes, heures):
     """Ajoute des heures TERMINEES a un fichier d'historique.
 
-    Trois cas :
-      - le fichier n'existe pas   -> on l'ecrit
-      - une de ces heures y figure deja, ou l'en-tete a change -> on relit
-        tout, on retire les heures concernees, et on reecrit. Sans ca, une
-        heure ecrite deux fois (par exemple apres une reprise) serait comptee
-        deux fois dans les totaux.
-      - sinon -> on ajoute a la suite, ce qui reste le cas courant
-    """
+    Si une heure y figure deja — parce qu'un autre passage l'avait deja
+    ecrite en partie — les deux enregistrements se COMBINENT : les ventes
+    s'additionnent, le plus haut et le plus bas gardent leurs extremes,
+    l'ouverture reste la premiere connue. On ne remplace jamais : chaque
+    processus ne voit qu'une partie des ressources avant de mourir, et
+    ecraser reviendrait a jeter le travail du precedent."""
     os.makedirs(os.path.dirname(chemin), exist_ok=True)
+    lignes = [[str(x) for x in l] for l in lignes]
+
     if not os.path.exists(chemin):
         with open(chemin, "w", newline="") as fh:
             w = csv.writer(fh)
@@ -266,37 +308,40 @@ def ajouter_main(chemin, entete, lignes, heures):
         return
 
     with open(chemin, newline="") as fh:
-        r = csv.reader(fh)
-        try:
-            vieux_entete = next(r)
-        except StopIteration:
-            vieux_entete = []
-        anciennes = [l for l in r if len(l) == len(vieux_entete)]
+        anciennes = lire_csv(fh.read(), entete)
+    with open(chemin, newline="") as fh:
+        meme_entete = next(csv.reader(fh), []) == entete
 
-    doublon = any(l and l[0] in heures for l in anciennes)
-    if vieux_entete == entete and not doublon:
+    idx = [i for i, c in enumerate(entete) if c in CLES]
+    cle = lambda l: tuple(l[i] for i in idx)
+    touchees = {c for c in (cle(l) for l in anciennes) if c[0] in heures}
+    a_combiner = touchees & {cle(l) for l in lignes}
+
+    if meme_entete and not a_combiner:
         with open(chemin, "a", newline="") as fh:
             csv.writer(fh).writerows(lignes)
         return
 
-    if vieux_entete != entete:
+    if not meme_entete:
         print(f"  {chemin} : en-tete mis a jour, fichier reecrit")
-    if doublon:
-        print(f"  {chemin} : heure(s) deja presente(s), remplacee(s)")
+    if a_combiner:
+        print(f"  {chemin} : {len(a_combiner)} ligne(s) completee(s) "
+              f"au lieu d'etre ecrasee(s)")
 
-    # on remet chaque ancienne ligne dans la nouvelle grille, par nom de
-    # colonne : une colonne ajoutee reste vide au lieu de tout decaler
-    place = {c: i for i, c in enumerate(vieux_entete)}
-    gardees = []
+    # les doublons deja presents dans le fichier se combinent eux aussi :
+    # une heure ecrite deux fois par le passe redevient une seule ligne juste
+    table = {}
     for l in anciennes:
-        if l and l[0] in heures:
-            continue
-        gardees.append([l[place[c]] if c in place else "" for c in entete])
+        k = cle(l)
+        table[k] = combiner(entete, table[k], l) if k in table else l
+    for l in lignes:
+        k = cle(l)
+        table[k] = combiner(entete, table[k], l) if k in table else l
 
     with open(chemin, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(entete)
-        w.writerows(sorted(gardees + [list(map(str, x)) for x in lignes],
+        w.writerows(sorted(table.values(),
                            key=lambda x: (x[0], int(x[1]), int(x[2]))))
 
 
