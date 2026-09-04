@@ -1,43 +1,63 @@
 #!/usr/bin/env python3
-"""Collecteur continu du marche Sim Companies.
+"""Collecteur de marche Sim Companies.
 
-Balaye sans arret les carnets d'ordres des ~155 ressources. Au lieu de
-reenregistrer tout le carnet a chaque tour — 95 % des ordres n'ont pas bouge —
-il n'ecrit que les MOUVEMENTS : ordre apparu, quantite reduite (une vente),
-ordre disparu. Dix-neuf fois moins de volume, et l'horodatage exact de chaque
-evenement.
+PRINCIPE
+--------
+Le programme ne se souvient de rien. Sa memoire, c'est le fichier.
 
-Sorties
-  data/tape/AAAA-MM/AAAA-MM-JJ.csv.gz   la bande des mouvements
-  data/book/AAAA-MM-JJ.csv              un resume par tour, ressource ET qualite
-  data/ticker/AAAA-MM-JJ.csv            le prix des 155 ressources, ~30 s
+A chaque demarrage il lit le carnet vivant sur la branche `live`, puis il
+tourne en boucle : il interroge les 143 ressources une par une, compare ce
+qu'il voit a ce que le fichier disait, en deduit ce qui s'est vendu, et
+reecrit le fichier. Si le programme meurt, celui qui le remplace reprend
+exactement ou il en etait. Aucun trou.
 
-Toutes les qualites (0 a 12 etoiles) sont suivies : une meme ressource en Q4
-se vend couramment 20 a 25 % plus cher qu'en Q0.
+DEUX BRANCHES
+-------------
+`live`  : reecrite par-dessus elle-meme a chaque envoi (un seul exemplaire
+          conserve, zero historique)
+            ordres.csv         les offres en cours, avec leur variation
+            heure_horaire.csv  l'heure en cours, en construction
+            heure_volume.csv   les volumes par prix de l'heure en cours
+
+`main`  : ne recoit qu'une heure TERMINEE, ajoutee une fois pour toutes
+            data/horaire/AAAA-MM.csv        toutes ressources, pour les vues
+                                            d'ensemble
+            data/volume/<ressource>/AAAA-MM.csv   range par ressource : le
+                                            tableau de bord ne charge que le
+                                            produit qu'on regarde
+
+VENDU OU RETIRE
+---------------
+Le jeu ne permet pas de reduire une offre en vente. Donc toute BAISSE
+PARTIELLE est une vente, sans discussion possible.
+
+Seule la disparition complete d'une offre est ambigue : vendue jusqu'au
+dernier, ou retiree par son vendeur. On tranche par le prix — si l'offre
+disparue etait au meilleur prix ou en dessous, personne n'aurait achete
+ailleurs, c'est une VENTE ; s'il restait moins cher sur le marche, c'est un
+RETRAIT.
 """
-import csv, functools, gzip, json, os, statistics, subprocess, sys, time
+import csv, functools, io, json, os, subprocess, sys, time
 import urllib.request, urllib.error
-
-print = functools.partial(print, flush=True)   # journal lisible en direct
 from datetime import datetime, timezone
+
+print = functools.partial(print, flush=True)
 
 REALM = 0
 TICKER = f"https://www.simcompanies.com/api/v3/market-ticker/{REALM}/"
 BOOK = "https://www.simcompanies.com/api/v3/market/all/%d/%d/"
-UA = "Mozilla/5.0 (compatible; simco-market-logger/2.0)"
+UA = "Mozilla/5.0 (compatible; simco-market-logger/3.0)"
 
-DELAY = float(os.environ.get("DELAY", "1.3"))          # entre deux requetes
-TICKER_SEC = int(os.environ.get("TICKER_SEC", "30"))   # frequence du ticker
-DUREE = int(os.environ.get("DUREE_MIN", "330")) * 60   # duree de vie du process
-COMMIT_SEC = int(os.environ.get("COMMIT_SEC", "600"))  # sauvegarde reguliere
+DELAY = float(os.environ.get("DELAY", "1.3"))            # entre deux requetes
+DUREE = int(os.environ.get("DUREE_MIN", "330")) * 60     # duree de vie
+LIVE_SEC = int(os.environ.get("LIVE_SEC", "300"))        # envoi du carnet
+BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
+
+FREIN = [0.0]     # ralentissement automatique quand le jeu refuse
+N429 = [0]
 
 
-# Frein automatique. Le serveur du jeu repond 429 ("trop de requetes") quand
-# on tape trop vite. A chaque 429 on ralentit un peu ; quand tout passe, on
-# reaccelere doucement. Le collecteur trouve tout seul le rythme accepte.
-FREIN = [0.0]        # secondes ajoutees a DELAY entre deux requetes
-N429 = [0]           # compteur, pour le journal
-
+# ---------------------------------------------------------------- reseau
 
 def fetch(url, tries=4):
     for i in range(tries):
@@ -46,12 +66,12 @@ def fetch(url, tries=4):
                                                        "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r:
                 d = json.loads(r.read().decode())
-            FREIN[0] = max(0.0, FREIN[0] - 0.02)      # on relache doucement
+            FREIN[0] = max(0.0, FREIN[0] - 0.02)
             return d
         except urllib.error.HTTPError as e:
             if e.code == 429:
                 N429[0] += 1
-                FREIN[0] = min(4.0, FREIN[0] + 0.3)   # on ralentit
+                FREIN[0] = min(4.0, FREIN[0] + 0.3)
                 attente = 0.0
                 try:
                     attente = float(e.headers.get("Retry-After") or 0)
@@ -75,242 +95,330 @@ def stamp(dt=None):
     return (dt or datetime.now(timezone.utc)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def age_h(iso, now):
-    try:
-        return round((now - datetime.fromisoformat(iso.replace("Z", "+00:00"))
-                      ).total_seconds() / 3600.0, 3)
-    except Exception:
-        return ""
+def heure_de(ts):
+    return ts[:13]              # AAAA-MM-JJTHH
 
 
-def entete_ok(chemin, entete, gz=False):
-    """Vrai si le fichier existe DEJA avec exactement cet en-tete.
+# ------------------------------------------------------------------- git
 
-    Si l'en-tete a change (nouvelle colonne, comme les etoiles de qualite),
-    on met l'ancien fichier de cote sous un autre nom au lieu d'ecrire des
-    lignes a 9 colonnes sous un en-tete a 8 : melangees, elles rendent tout
-    le fichier illisible. Chaque fichier garde ainsi un seul format.
-    """
-    if not os.path.exists(chemin):
-        return False
-    attendu = ",".join(entete)
-    try:
-        ouvrir = gzip.open if gz else open
-        with ouvrir(chemin, "rt", newline="") as fh:
-            premiere = fh.readline().strip("\r\n")
-    except Exception:
-        premiere = None
-    if premiere == attendu:
-        return True
-    base, ext = chemin, ""
-    if base.endswith(".csv.gz"):
-        base, ext = base[:-7], ".csv.gz"
-    elif base.endswith(".csv"):
-        base, ext = base[:-4], ".csv"
-    n = 1
-    while os.path.exists(f"{base}.ancien{n}{ext}"):
-        n += 1
-    os.rename(chemin, f"{base}.ancien{n}{ext}")
-    print(f"  en-tete different : {chemin} mis de cote en "
-          f"{base}.ancien{n}{ext}, nouveau fichier propre")
-    return False
+def git(*a, entree=None):
+    return subprocess.run(["git", *a], input=entree,
+                          capture_output=True, text=True)
 
 
-class Sortie:
-    """Gere les trois fichiers du jour, reouverts au changement de date."""
-
-    def __init__(self):
-        self.jour = None
-
-    def ouvrir(self, now):
-        j = now.strftime("%Y-%m-%d")
-        if j == self.jour:
-            return
-        self.fermer()
-        self.jour = j
-        mois = now.strftime("%Y-%m")
-        os.makedirs(f"data/tape/{mois}", exist_ok=True)
-        os.makedirs("data/book", exist_ok=True)
-        os.makedirs("data/ticker", exist_ok=True)
-
-        e = ["ts", "kind", "quality", "evt", "order_id",
-             "price", "qty", "delta", "seller_id", "reprise"]
-        p = f"data/tape/{mois}/{j}.csv.gz"
-        neuf = not entete_ok(p, e, gz=True)
-        self.f_tape = gzip.open(p, "at", newline="")
-        self.w_tape = csv.writer(self.f_tape)
-        if neuf:
-            self.w_tape.writerow(e)
-
-        e = ["ts", "kind", "quality", "best", "qty_best", "n_orders",
-             "total_qty", "qty_within_5pct", "median_age_h"]
-        p = f"data/book/{j}.csv"
-        neuf = not entete_ok(p, e)
-        self.f_book = open(p, "a", newline="")
-        self.w_book = csv.writer(self.f_book)
-        if neuf:
-            self.w_book.writerow(e)
-
-        e = ["ts", "kind", "price", "is_up"]
-        p = f"data/ticker/{j}.csv"
-        neuf = not entete_ok(p, e)
-        self.f_tick = open(p, "a", newline="")
-        self.w_tick = csv.writer(self.f_tick)
-        if neuf:
-            self.w_tick.writerow(e)
-
-    def fermer(self):
-        for a in ("f_tape", "f_book", "f_tick"):
-            if hasattr(self, a):
-                getattr(self, a).close()
-
-    def vider(self):
-        for a in ("f_tape", "f_book", "f_tick"):
-            if hasattr(self, a):
-                getattr(self, a).flush()
-
-    def boucler(self, now):
-        """Ferme et rouvre les fichiers : sur le disque ils sont alors
-        complets et valides, prets a etre enregistres."""
-        self.fermer()
-        self.jour = None
-        self.ouvrir(now)
+EN_ORDRES = ["kind", "quality", "order_id", "seller_id", "price", "qty",
+             "delta", "vu", "maj"]
+EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
+              "cloture", "n_ordres", "qte_totale", "profondeur_5pct",
+              "vendu", "retire"]
+EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "n_evt"]
 
 
-def sauvegarder():
-    """Enregistre le travail fait jusqu'ici, pour ne rien perdre si le job
-    est interrompu."""
-    def sh(*a):
-        return subprocess.run(a, capture_output=True, text=True).returncode
-    # On refait la synthese horaire avant chaque enregistrement : sans ca, le
-    # fichier data/hourly ne serait rafraichi qu'a la fin de la course, soit
-    # toutes les 5 h 30 — le tableau de bord afficherait des donnees perimees.
-    r = subprocess.run([sys.executable, "rollup.py"], capture_output=True, text=True)
+def en_csv(entete, lignes):
+    s = io.StringIO()
+    w = csv.writer(s, lineterminator="\n")
+    w.writerow(entete)
+    w.writerows(lignes)
+    return s.getvalue()
+
+
+def lire_csv(texte, entete):
+    """Lit un CSV en ignorant les lignes qui n'ont pas le bon nombre de
+    colonnes ou dont l'en-tete a change."""
+    if not texte:
+        return []
+    lignes = texte.strip().split("\n")
+    if not lignes or lignes[0].strip("\r") != ",".join(entete):
+        return []
+    out = []
+    for l in csv.reader(lignes[1:]):
+        if len(l) == len(entete):
+            out.append(l)
+    return out
+
+
+def charger_live():
+    """La memoire du programme : le carnet et l'heure en cours, tels que le
+    programme precedent les a laisses."""
+    r = git("fetch", "--depth=1", "--force", "origin", "live")
     if r.returncode != 0:
-        print("  ! synthese horaire en echec : " +
-              (r.stderr.strip().splitlines() or ["?"])[-1])
-    sh("git", "add", "data")
-    if subprocess.run(["git", "diff", "--staged", "--quiet"]).returncode == 0:
+        print("  branche live absente — premier demarrage, on repart a neuf")
+        return {}, {}, {}
+    def lire(nom, entete):
+        s = git("show", f"FETCH_HEAD:{nom}")
+        return lire_csv(s.stdout, entete) if s.returncode == 0 else []
+
+    ordres = {}
+    for k, q, oid, sid, p, qt, dl, vu, maj in lire("ordres.csv", EN_ORDRES):
+        ordres[oid] = {"kind": int(k), "q": int(q), "sid": sid,
+                       "p": float(p), "qt": float(qt), "vu": vu, "maj": maj}
+
+    agg = {}
+    for r_ in lire("heure_horaire.csv", EN_HORAIRE):
+        h, k, q = r_[0], int(r_[1]), int(r_[2])
+        agg[(h, k, q)] = {
+            "o": flt(r_[3]), "h": flt(r_[4]), "b": flt(r_[5]), "c": flt(r_[6]),
+            "n": int(r_[7] or 0), "qte": flt(r_[8]) or 0.0,
+            "prof": flt(r_[9]), "vendu": flt(r_[10]) or 0.0,
+            "retire": flt(r_[11]) or 0.0}
+
+    volp = {}
+    for h, k, q, p, v, n in lire("heure_volume.csv", EN_VOLUME):
+        volp[(h, int(k), int(q), float(p))] = [float(v), int(n)]
+
+    print(f"  memoire reprise : {len(ordres)} ordres, "
+          f"{len(agg)} heures en cours, {len(volp)} paliers de prix")
+    return ordres, agg, volp
+
+
+def flt(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def pousser_live(fichiers):
+    """Reecrit la branche live par-dessus elle-meme : un commit sans parent,
+    pousse en force. GitHub ne conserve donc jamais qu'un exemplaire."""
+    entrees = []
+    for nom, contenu in fichiers.items():
+        h = git("hash-object", "-w", "--stdin", entree=contenu)
+        if h.returncode != 0:
+            print("  ! ecriture live impossible"); return False
+        entrees.append(f"100644 blob {h.stdout.strip()}\t{nom}")
+    t = git("mktree", entree="\n".join(entrees) + "\n")
+    if t.returncode != 0:
+        print("  ! arbre live impossible"); return False
+    c = git("commit-tree", t.stdout.strip(), "-m", "carnet " + stamp())
+    if c.returncode != 0:
+        print("  ! commit live impossible"); return False
+    p = git("push", "--force", "origin", f"{c.stdout.strip()}:refs/heads/live")
+    if p.returncode != 0:
+        print("  ! envoi live refuse : " + p.stderr.strip().splitlines()[-1:][0]
+              if p.stderr.strip() else "  ! envoi live refuse")
+        return False
+    return True
+
+
+def ajouter_main(chemin, entete, lignes):
+    """Ajoute des heures TERMINEES a un fichier d'historique."""
+    os.makedirs(os.path.dirname(chemin), exist_ok=True)
+    neuf = not os.path.exists(chemin)
+    if not neuf:
+        with open(chemin) as fh:
+            if fh.readline().strip() != ",".join(entete):
+                # l'en-tete a change : on met l'ancien de cote
+                n = 1
+                while os.path.exists(f"{chemin[:-4]}.ancien{n}.csv"):
+                    n += 1
+                os.rename(chemin, f"{chemin[:-4]}.ancien{n}.csv")
+                neuf = True
+    with open(chemin, "a", newline="") as fh:
+        w = csv.writer(fh)
+        if neuf:
+            w.writerow(entete)
+        w.writerows(lignes)
+
+
+def pousser_main(message):
+    git("add", "data")
+    if git("diff", "--staged", "--quiet").returncode == 0:
         return
-    sh("git", "commit", "-m", "collecte " + stamp())
-    br = os.environ.get("GITHUB_REF_NAME", "main")
+    git("commit", "-m", message)
     for i in range(5):
-        sh("git", "pull", "--rebase", "--autostash", "origin", br)
-        if sh("git", "push") == 0:
-            print("  enregistre")
+        git("pull", "--rebase", "--autostash", "origin", BRANCHE)
+        if git("push").returncode == 0:
+            print("  historique enregistre")
             return
         time.sleep(5 + i * 5)
-    print("  ECHEC de l'enregistrement")
+    print("  ! ECHEC de l'enregistrement de l'historique")
 
+
+# ------------------------------------------------------------- traitement
+
+def traiter(kind, book, ordres, agg, volp, ts):
+    """Compare le carnet recu a ce qu'on avait, en tire les ventes."""
+    h = heure_de(ts)
+    par_q = {}
+    for x in book:
+        par_q.setdefault(int(x.get("quality", 0)), []).append(x)
+
+    vus = set()
+    for q, offres in par_q.items():
+        offres.sort(key=lambda x: x["price"])
+        meilleur = offres[0]["price"]
+        total = sum(o["quantity"] for o in offres)
+        prof = sum(o["quantity"] for o in offres
+                   if o["price"] <= meilleur * 1.05)
+
+        a = agg.get((h, kind, q))
+        if a is None:
+            a = agg[(h, kind, q)] = {"o": meilleur, "h": meilleur,
+                                     "b": meilleur, "c": meilleur, "n": 0,
+                                     "qte": 0.0, "prof": None,
+                                     "vendu": 0.0, "retire": 0.0}
+        a["h"] = max(a["h"], meilleur)
+        a["b"] = min(a["b"], meilleur)
+        a["c"] = meilleur
+        a["n"] = len(offres)
+        a["qte"] = total
+        a["prof"] = prof
+
+        for o in offres:
+            oid = str(o["id"])
+            vus.add(oid)
+            av = ordres.get(oid)
+            qt = float(o["quantity"])
+            p = float(o["price"])
+            if av is None:
+                ordres[oid] = {"kind": kind, "q": q, "sid": str(
+                    (o.get("seller") or {}).get("id", "")), "p": p, "qt": qt,
+                    "vu": ts, "maj": ts, "delta": ""}
+                continue
+            delta = av["qt"] - qt
+            if delta > 0:
+                # une offre ne peut pas etre reduite par son vendeur :
+                # une baisse partielle est toujours une vente
+                vendre(delta, av["p"], kind, q, h, agg, volp)
+            if delta != 0 or p != av["p"]:
+                av["maj"] = ts
+            av["delta"] = -delta if delta else ""
+            av["qt"] = qt
+            av["p"] = p
+            av["q"] = q
+
+    # les ordres de cette ressource qui ne sont plus la
+    meilleurs = {q: min(o["price"] for o in offres)
+                 for q, offres in par_q.items()}
+    for oid in [o for o, v in ordres.items()
+                if v["kind"] == kind and o not in vus]:
+        v = ordres.pop(oid)
+        mb = meilleurs.get(v["q"])
+        classer_disparition(v["qt"], v["p"], mb, kind, v["q"], h, agg, volp)
+
+
+def vendre(qte, prix, kind, q, h, agg, volp):
+    """Une vente : on l'ajoute au total de l'heure ET au palier de prix."""
+    a = agg.get((h, kind, q))
+    if a is None:
+        return
+    a["vendu"] += qte
+    e = volp.setdefault((h, kind, q, round(prix, 4)), [0.0, 0])
+    e[0] += qte
+    e[1] += 1
+
+
+def classer_disparition(qte, prix, meilleur_restant, kind, q, h, agg, volp):
+    """Une offre entiere a disparu. Au meilleur prix ou en dessous : plus
+    personne n'aurait achete ailleurs, c'est une vente. Plus chere qu'une
+    offre encore presente : le vendeur l'a retiree."""
+    if meilleur_restant is None or prix <= meilleur_restant + 1e-9:
+        vendre(qte, prix, kind, q, h, agg, volp)
+    else:
+        a = agg.get((h, kind, q))
+        if a is not None:
+            a["retire"] += qte
+
+
+def lignes_horaire(agg, heures=None):
+    out = []
+    for (h, k, q), a in sorted(agg.items()):
+        if heures is not None and h not in heures:
+            continue
+        out.append([h, k, q, a["o"], a["h"], a["b"], a["c"], a["n"],
+                    round(a["qte"]), round(a["prof"]) if a["prof"] is not None else "",
+                    round(a["vendu"]), round(a["retire"])])
+    return out
+
+
+def lignes_volume(volp, heures=None):
+    out = []
+    for (h, k, q, p), (v, n) in sorted(volp.items()):
+        if heures is not None and h not in heures:
+            continue
+        out.append([h, k, q, p, round(v), n])
+    return out
+
+
+def lignes_ordres(ordres):
+    out = []
+    for oid, v in ordres.items():
+        out.append([v["kind"], v["q"], oid, v["sid"], v["p"], round(v["qt"]),
+                    v.get("delta", ""), v["vu"], v["maj"]])
+    # tri stable : deux versions successives du fichier se ressemblent au
+    # maximum, ce qui garde l'envoi leger
+    out.sort(key=lambda r: (r[0], r[1], r[4], r[2]))
+    return out
+
+
+# ------------------------------------------------------------------ boucle
 
 def main():
-    etat = {}                 # kind -> {order_id: (prix, quantite)}
-    out = Sortie()
-    fin = time.time() + DUREE
-    dernier_ticker = 0.0
-    rates_tick = [0]
-    dernier_commit = time.time()
-    tour = 0
-    evts = 0
+    debut = time.time()
+    ordres, agg, volp = charger_live()
 
-    kinds = sorted({r["kind"] for r in (fetch(TICKER) or [])})
-    if not kinds:
-        raise SystemExit("ticker injoignable, on arrete")
+    tk = fetch(TICKER, tries=3)
+    kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*DELAY/60:.1f} min")
+          f"~{len(kinds)*(DELAY+0.7)/60:.1f} min")
 
-    while time.time() < fin:
+    dernier_live = 0.0
+    tour = 0
+    while time.time() - debut < DUREE:
         tour += 1
         t0 = time.time()
         for k in kinds:
-            if time.time() > fin:
+            if time.time() - debut > DUREE:
                 break
-            now = datetime.now(timezone.utc)
-            out.ouvrir(now)
-
-            # le ticker, une requete, intercale toutes les ~30 s
-            if time.time() - dernier_ticker > TICKER_SEC:
-                tk = fetch(TICKER, tries=2)
-                if tk:
-                    dernier_ticker = time.time()
-                    rates_tick[0] = 0
-                    ts = stamp(now)
-                    for r in tk:
-                        out.w_tick.writerow([ts, r["kind"], r["price"],
-                                             int(bool(r.get("is_up")))])
-                else:
-                    # on NE met PAS a jour le compteur : nouvel essai des la
-                    # ressource suivante, au lieu d'attendre 30 s de plus
-                    rates_tick[0] += 1
-                    if rates_tick[0] in (1, 5, 20, 100):
-                        print(f"  ticker indisponible ({rates_tick[0]} echecs "
-                              f"d'affilee) — on continue et on reessaie")
-                time.sleep(DELAY + FREIN[0])
-
             book = fetch(BOOK % (REALM, k))
+            if book:
+                traiter(k, book, ordres, agg, volp, stamp())
             time.sleep(DELAY + FREIN[0])
-            if book is None:
-                continue
-            now = datetime.now(timezone.utc)
-            ts = stamp(now)
-            book.sort(key=lambda x: x["price"])
 
-            # --- resume du carnet, une ligne par niveau de qualite
-            par_q = {}
-            for x in book:
-                par_q.setdefault(x.get("quality", 0), []).append(x)
-            for q in sorted(par_q):
-                sous = par_q[q]
-                best = sous[0]["price"]
-                ages = [v for v in (age_h(x.get("posted") or "", now)
-                                    for x in sous[:20]) if v != ""]
-                out.w_book.writerow([
-                    ts, k, q, best,
-                    sum(x["quantity"] for x in sous if x["price"] == best),
-                    len(sous), sum(x["quantity"] for x in sous),
-                    sum(x["quantity"] for x in sous if x["price"] <= best * 1.05),
-                    round(statistics.median(ages), 3) if ages else ""])
+            if time.time() - dernier_live > LIVE_SEC:
+                dernier_live = time.time()
+                fermer_et_envoyer(ordres, agg, volp)
 
-            # --- mouvements depuis le tour precedent
-            neuf = {str(x["id"]): (x["price"], x["quantity"],
-                                   x.get("quality", 0)) for x in book}
-            vendeurs = {str(x["id"]): (x.get("seller") or {}).get("id", "")
-                        for x in book}
-            ancien = etat.get(k)
-            reprise = 1 if ancien is None else 0
-            ancien = ancien or {}
-
-            for oid, (p, qt, ql) in neuf.items():
-                if oid not in ancien:
-                    out.w_tape.writerow([ts, k, ql, "N", oid, p, qt, "",
-                                         vendeurs[oid], reprise]); evts += 1
-                else:
-                    ap, aq, _ = ancien[oid]
-                    if qt != aq:
-                        out.w_tape.writerow([ts, k, ql, "C", oid, p, qt, aq - qt,
-                                             vendeurs[oid], 0]); evts += 1
-                    if p != ap:
-                        out.w_tape.writerow([ts, k, ql, "P", oid, p, qt, "",
-                                             vendeurs[oid], 0]); evts += 1
-            for oid, (p, qt, ql) in ancien.items():
-                if oid not in neuf:
-                    out.w_tape.writerow([ts, k, ql, "X", oid, p, 0, qt, "", 0])
-                    evts += 1
-            etat[k] = neuf
-
-        out.vider()
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
-              f"{evts} mouvements cumules, "
-              f"dernier ticker il y a {int(time.time()-dernier_ticker)} s, "
-                  f"frein {FREIN[0]:.2f} s, {N429[0]} refus 429")
+              f"{len(ordres)} ordres suivis, frein {FREIN[0]:.2f} s, "
+              f"{N429[0]} refus 429")
 
-        if time.time() - dernier_commit > COMMIT_SEC:
-            out.boucler(datetime.now(timezone.utc))
-            sauvegarder()
-            dernier_commit = time.time()
+    fermer_et_envoyer(ordres, agg, volp, final=True)
+    print(f"{tour} tours effectues")
 
-    out.fermer()
-    print(f"\n{tour} tours, {evts} mouvements enregistres")
+
+def fermer_et_envoyer(ordres, agg, volp, final=False):
+    """Les heures terminees partent dans l'historique ; l'heure en cours et
+    le carnet vont sur la branche live."""
+    en_cours = max((h for h, _, _ in agg), default=None)
+    finies = sorted({h for h, _, _ in agg if h != en_cours})
+
+    if finies:
+        for h in finies:
+            mois = h[:7]
+            ajouter_main(f"data/horaire/{mois}.csv", EN_HORAIRE,
+                         lignes_horaire(agg, {h}))
+            par_res = {}
+            for l in lignes_volume(volp, {h}):
+                par_res.setdefault(l[1], []).append(l)
+            for k, l in par_res.items():
+                ajouter_main(f"data/volume/{k}/{mois}.csv", EN_VOLUME, l)
+        for cle in [c for c in agg if c[0] in finies]:
+            del agg[cle]
+        for cle in [c for c in volp if c[0] in finies]:
+            del volp[cle]
+        pousser_main("heures " + ", ".join(finies))
+        print(f"  {len(finies)} heure(s) archivee(s) : {', '.join(finies)}")
+
+    ok = pousser_live({
+        "ordres.csv": en_csv(EN_ORDRES, lignes_ordres(ordres)),
+        "heure_horaire.csv": en_csv(EN_HORAIRE, lignes_horaire(agg)),
+        "heure_volume.csv": en_csv(EN_VOLUME, lignes_volume(volp)),
+    })
+    if ok:
+        print(f"  carnet envoye ({len(ordres)} ordres)" +
+              (" — dernier envoi" if final else ""))
 
 
 if __name__ == "__main__":

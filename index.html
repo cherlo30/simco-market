@@ -79,21 +79,24 @@ tr:last-child td{border-bottom:0}
 .err{color:var(--bad)}
 .dim{color:var(--muted)}
 footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
+</style><style>
+.frais{font-size:11px;color:var(--muted);margin-left:8px}
+.pastille{display:inline-block;width:7px;height:7px;border-radius:50%;
+  background:var(--good);margin-right:5px;vertical-align:middle}
+.moi{color:var(--s2);font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>Marche Sim Companies</h1>
-<p class="sub" id="sub">Chargement des donnees...</p>
+<p class="sub" id="sub">Chargement...</p>
 
 <div class="bar">
-  <div><label for="res">Ressource</label>
-    <select id="res"></select></div>
-  <div><label for="qual">Qualite</label>
-    <select id="qual"></select></div>
+  <div><label for="res">Ressource</label><select id="res"></select></div>
+  <div><label for="qual">Qualite</label><select id="qual"></select></div>
   <div><label for="jours">Periode</label>
     <select id="jours">
-      <option value="2">48 heures</option>
+      <option value="1">24 heures</option>
       <option value="7" selected>7 jours</option>
       <option value="30">30 jours</option>
       <option value="999">Tout</option>
@@ -101,6 +104,12 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 </div>
 
 <div class="kpis" id="kpis"></div>
+
+<div class="card">
+  <h2>Volume echange, prix par prix</h2>
+  <p class="h" id="h_vol">Combien d'unites sont parties a chaque prix sur la periode. C'est le prix ou le marche accepte vraiment d'acheter.</p>
+  <div id="c_vol"></div><div class="tip" id="t_vol"></div>
+</div>
 
 <div class="card">
   <h2>Prix heure par heure</h2>
@@ -116,14 +125,20 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 
 <div class="card">
   <h2>A quelle heure vendre</h2>
-  <p class="h" id="h_prof">Ecart moyen du prix par rapport a la moyenne du jour, heure par heure (UTC).</p>
-  <div id="c_heure"></div><div class="tip" id="t_heure"></div>
+  <p class="h" id="h_heure">Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC).</p>
+  <div id="c_heure"></div>
 </div>
 
 <div class="card">
   <h2>Prix selon le nombre d'etoiles</h2>
-  <p class="h">Dernier prix releve pour chaque niveau de qualite.</p>
-  <div id="c_qual"></div><div class="tip" id="t_qual"></div>
+  <p class="h">Meilleur prix en vente a l'instant, pour chaque niveau de qualite.</p>
+  <div id="c_qual"></div>
+</div>
+
+<div class="card">
+  <h2>Le carnet en direct</h2>
+  <p class="h" id="h_carnet">Les offres en vente, de la moins chere a la plus chere.</p>
+  <div class="scroll"><table id="t_carnet"></table></div>
 </div>
 
 <div class="card">
@@ -140,7 +155,7 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 </div>
 
 <div class="card">
-  <h2>Les 20 dernieres heures en detail</h2>
+  <h2>Les 24 dernieres heures en detail</h2>
   <div class="scroll"><table id="t_tab"></table></div>
 </div>
 
@@ -148,33 +163,34 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 </div>
 <script>
 const NOMS = {"1": "Electricite", "2": "Eau", "3": "Pommes", "4": "Oranges", "5": "Raisin", "6": "Cereales", "7": "Steak", "8": "Saucisses", "9": "Oeufs", "10": "Petrole brut", "11": "Essence", "12": "Diesel", "13": "Transport", "14": "Mineraux", "15": "Bauxite", "16": "Silicium", "17": "Produits chimiques", "18": "Aluminium", "19": "Plastique", "20": "Processeurs", "21": "Composants electroniques", "22": "Batteries", "23": "Ecrans", "24": "Smartphones", "25": "Tablettes", "26": "Ordinateurs portables", "27": "Moniteurs", "28": "Televiseurs", "29": "Recherche vegetale", "30": "Recherche energie", "31": "Recherche miniere", "32": "Recherche electronique", "33": "Recherche elevage", "34": "Recherche chimique", "35": "Logiciel", "40": "Coton", "41": "Tissu", "42": "Minerai de fer", "43": "Acier", "44": "Sable", "45": "Verre", "46": "Cuir", "47": "Ordinateur de bord", "48": "Moteur electrique", "49": "Interieur de luxe", "50": "Interieur de voiture", "51": "Carrosserie", "52": "Moteur thermique", "53": "Voiture electrique economique", "54": "Voiture electrique de luxe", "55": "Voiture economique", "56": "Voiture de luxe", "57": "Camion", "58": "Recherche automobile", "59": "Recherche mode", "60": "Sous-vetements", "61": "Gants", "62": "Robe", "63": "Chaussures Simmi", "64": "Sacs a main", "65": "Baskets", "66": "Semences", "67": "Papillotes de Noel", "68": "Minerai d'or", "69": "Lingots d'or", "70": "Montre en or", "71": "Collier", "72": "Canne a sucre", "73": "Ethanol", "74": "Methane", "75": "Fibre de carbone", "76": "Composite carbone", "77": "Fuselage", "78": "Aile", "79": "Composants haut de gamme", "80": "Calculateur de vol", "81": "Cockpit", "82": "Controle d'attitude", "83": "Carburant de fusee", "84": "Reservoir", "85": "Fusee a propergol solide", "86": "Moteur de fusee", "87": "Bouclier thermique", "88": "Propulseur ionique", "89": "Reacteur", "98": "Quadricoptere", "100": "Recherche aerospatiale", "101": "Beton arme", "102": "Briques", "103": "Ciment", "104": "Argile", "105": "Calcaire", "106": "Bois", "107": "Poutres d'acier", "108": "Planches", "109": "Fenetres", "110": "Outils", "111": "Unites de construction", "112": "Bulldozer", "113": "Recherche materiaux", "114": "Robots", "115": "Vache", "116": "Cochon", "117": "Lait", "118": "Grains de cafe", "119": "Cafe moulu", "120": "Legumes", "121": "Pain", "122": "Fromage", "123": "Tarte aux pommes", "124": "Jus d'orange", "125": "Cidre", "126": "Biere de gingembre", "127": "Pizza", "128": "Pates", "129": "Hamburger", "130": "Lasagnes", "131": "Boulettes", "132": "Cocktails", "133": "Farine", "134": "Beurre", "135": "Sucre", "136": "Feves de cacao", "137": "Pate", "138": "Sauciere", "139": "Fourrage", "140": "Chocolat", "141": "Huile vegetale", "142": "Salade", "143": "Samosas", "144": "Boule de Noel", "145": "Recettes", "146": "Citrouille", "147": "Citrouille sculptee", "148": "Costume de sorciere", "149": "Soupe de citrouille", "150": "Sapin", "151": "Lapin de Paques", "152": "Douceurs du Ramadan", "153": "Glace chocolat", "154": "Glace pomme", "155": "Oeuf en creme"};
+const DEPOT = "https://raw.githubusercontent.com/cherlo30/simco-market/";
+const LIVE = DEPOT + "live/";        // le carnet vivant, reecrit toutes les 5 min
+const HIST = DEPOT + "main/";        // l'historique, une ecriture par heure
 
-const RAW = "https://raw.githubusercontent.com/cherlo30/simco-market/main/";
 const nom = k => NOMS[k] || ("ressource " + k);
 const fmt = (v, d) => v == null || !isFinite(v) ? "—" :
   v.toLocaleString("fr-FR", {minimumFractionDigits: d, maximumFractionDigits: d});
-// precision adaptee : 0,2580 $ pour l'eau, 6,60 $ pour la citrouille
-const prix = v => v == null || !isFinite(v) ? "\u2014" :
+const prix = v => v == null || !isFinite(v) ? "—" : v === 0 ? "0" :
   v.toLocaleString("fr-FR", Math.abs(v) < 1
     ? {minimumFractionDigits: 4, maximumFractionDigits: 4}
     : {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const ent = v => v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("fr-FR");
 
-/* ---------- lecture des CSV ---------------------------------------- */
+/* ---------- lecture ------------------------------------------------ */
 
-async function charge(chemin) {
-  for (const base of ["", RAW]) {
+async function charge(url, relatif) {
+  const cb = "?t=" + Math.floor(Date.now() / 60000);   // contourne le cache
+  for (const u of (relatif ? [relatif + cb, url + cb] : [url + cb])) {
     try {
-      const r = await fetch(base + chemin, {cache: "no-store"});
+      const r = await fetch(u, {cache: "no-store"});
       if (r.ok) return await r.text();
-    } catch (e) { /* on tente la source suivante */ }
+    } catch (e) { /* source suivante */ }
   }
   return null;
 }
 
-// Ignore les lignes dont le nombre de colonnes ne colle pas a l'en-tete :
-// un fichier ecrit par deux versions du collecteur en contient.
 function csv(texte) {
+  if (!texte) return [];
   const l = texte.trim().split("\n").map(x => x.replace(/\r$/, ""));
   const en = l[0].split(",");
   const out = [];
@@ -196,93 +212,130 @@ const num = x => {
 
 /* ---------- etat --------------------------------------------------- */
 
-let LIGNES = [];        // toutes les lignes horaires
-let PARCLE = new Map(); // "kind|quality" -> lignes triees
+let ORDRES = [];              // le carnet vivant, toutes ressources
+let HORAIRE = new Map();      // "kind|quality" -> lignes triees par heure
+let VOLUME = [];              // volumes par prix de la ressource affichee
+let VOL_KIND = null;
+let AGE = "";                 // fraicheur du carnet
+
+function moisRecents(n) {
+  const d = new Date(), out = [];
+  for (let i = 0; i < n; i++)
+    out.push(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1))
+      .toISOString().slice(0, 7));
+  return out;
+}
 
 async function demarrer() {
-  const now = new Date();
-  const mois = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-    mois.push(d.toISOString().slice(0, 7));
-  }
-  const textes = await Promise.all(mois.map(m => charge("data/hourly/" + m + ".csv")));
-  textes.filter(Boolean).forEach(t => LIGNES.push(...csv(t)));
+  const mois = moisRecents(2);
+  const [tOrdres, tHeure, ...tHist] = await Promise.all([
+    charge(LIVE + "ordres.csv", "live/ordres.csv"),
+    charge(LIVE + "heure_horaire.csv", "live/heure_horaire.csv"),
+    ...mois.map(m => charge(HIST + "data/horaire/" + m + ".csv",
+                            "data/horaire/" + m + ".csv"))
+  ]);
 
-  if (!LIGNES.length) {
+  ORDRES = csv(tOrdres).map(r => ({
+    k: +r.kind, q: +r.quality, id: r.order_id, sid: r.seller_id,
+    p: num(r.price), qt: num(r.qty), d: num(r.delta), vu: r.vu, maj: r.maj
+  })).filter(o => o.p != null && o.qt != null);
+
+  const hist = [];
+  tHist.filter(Boolean).forEach(t => hist.push(...csv(t)));
+  csv(tHeure).forEach(r => hist.push(r));       // l'heure en cours
+
+  if (!hist.length && !ORDRES.length) {
     document.getElementById("sub").innerHTML =
-      '<span class="err">Aucune donnee trouvee.</span> Le fichier data/hourly/' +
-      mois[0] + '.csv est-il bien present dans le depot ?';
+      '<span class="err">Aucune donnee.</span> La collecte a-t-elle deja tourne ' +
+      'avec le nouveau format ?';
     return;
   }
 
-  for (const r of LIGNES) {
-    const cle = r.kind + "|" + (r.quality || "0");
-    if (!PARCLE.has(cle)) PARCLE.set(cle, []);
-    PARCLE.get(cle).push({
-      h: r.heure,
-      o: num(r.ouverture), hi: num(r.haut), lo: num(r.bas), c: num(r.cloture),
-      n: num(r.n_releves) || 0,
-      vol: num(r.volume) || 0,
-      val: num(r.valeur) || 0,
-      prof: num(r.profondeur_5pct)
+  for (const r of hist) {
+    const cle = (+r.kind) + "|" + (+r.quality || 0);
+    if (!HORAIRE.has(cle)) HORAIRE.set(cle, []);
+    HORAIRE.get(cle).push({
+      h: r.heure, o: num(r.ouverture), hi: num(r.haut), lo: num(r.bas),
+      c: num(r.cloture), n: num(r.n_ordres), qte: num(r.qte_totale),
+      prof: num(r.profondeur_5pct), vendu: num(r.vendu) || 0,
+      retire: num(r.retire) || 0
     });
   }
-  for (const v of PARCLE.values()) v.sort((a, b) => a.h < b.h ? -1 : 1);
-
-  // liste des ressources, les mieux suivies d'abord
-  const compte = new Map();
-  for (const r of LIGNES) {
-    const k = Number(r.kind);
-    compte.set(k, (compte.get(k) || 0) + 1);
+  for (const v of HORAIRE.values()) {
+    v.sort((a, b) => a.h < b.h ? -1 : 1);
+    // l'heure en cours peut apparaitre deux fois : on garde la plus recente
+    for (let i = v.length - 1; i > 0; i--) if (v[i].h === v[i - 1].h) v.splice(i - 1, 1);
   }
-  const kinds = [...compte.keys()].sort((a, b) => nom(a).localeCompare(nom(b), "fr"));
+
+  const kinds = [...new Set([...ORDRES.map(o => o.k),
+    ...[...HORAIRE.keys()].map(c => +c.split("|")[0])])]
+    .sort((a, b) => nom(a).localeCompare(nom(b), "fr"));
   const sel = document.getElementById("res");
   for (const k of kinds) {
     const o = document.createElement("option");
     o.value = k; o.textContent = nom(k) + "  (" + k + ")";
     sel.appendChild(o);
   }
-  sel.value = kinds.includes(146) ? 146 : kinds[0];
+  sel.value = kinds.includes(146) ? "146" : String(kinds[0]);
 
-  const derniere = LIGNES.reduce((m, r) => r.heure > m ? r.heure : m, "");
-  document.getElementById("sub").textContent =
-    kinds.length + " ressources suivies · " + LIGNES.length.toLocaleString("fr-FR") +
-    " heures enregistrees · dernier releve " + derniere.replace("T", " a ") + " h UTC";
+  const maj = ORDRES.reduce((m, o) => o.maj > m ? o.maj : m, "");
+  const retard = maj ? Math.round((Date.now() - new Date(maj).getTime()) / 60000) : null;
+  AGE = retard == null ? "" : (retard < 2 ? "a l'instant" : "il y a " + retard + " min");
+  document.getElementById("sub").innerHTML =
+    '<span class="pastille"></span>' + ent(ORDRES.length) + " offres en vente sur " +
+    kinds.length + " ressources · carnet mis a jour " + AGE +
+    " · " + ent(hist.length) + " heures d'historique";
   document.getElementById("foot").textContent =
-    "Donnees collectees en continu depuis GitHub Actions. La page lit les fichiers du depot a chaque ouverture.";
+    "Le carnet est reecrit toutes les 5 minutes. L'historique est fige heure par heure.";
 
   ["res", "qual", "jours", "i_frais", "i_tr", "i_tru", "i_qte"]
     .forEach(id => document.getElementById(id)
-      .addEventListener("change", id === "res" ? majQualites : dessine));
-  majQualites();
+      .addEventListener("change", id === "res" ? changerRessource : dessine));
+  changerRessource();
 }
 
-function majQualites() {
+async function changerRessource() {
   const k = document.getElementById("res").value;
-  const qs = [...PARCLE.keys()].filter(c => c.split("|")[0] === k)
-    .map(c => Number(c.split("|")[1])).sort((a, b) => a - b);
+  const qs = [...new Set(ORDRES.filter(o => o.k == k).map(o => o.q))]
+    .concat([...HORAIRE.keys()].filter(c => c.split("|")[0] === k)
+      .map(c => +c.split("|")[1]))
+    .filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => a - b);
   const sel = document.getElementById("qual");
   const avant = sel.value;
   sel.innerHTML = "";
-  for (const q of qs) {
+  for (const q of (qs.length ? qs : [0])) {
     const o = document.createElement("option");
-    o.value = q; o.textContent = q === 0 ? "0 etoile" : q + (q > 1 ? " etoiles" : " etoile");
+    o.value = q;
+    o.textContent = q === 0 ? "0 etoile" : q + (q > 1 ? " etoiles" : " etoile");
     sel.appendChild(o);
   }
-  sel.value = (avant !== "" && qs.includes(Number(avant))) ? avant
-            : (qs.includes(0) ? "0" : String(qs[0]));
+  sel.value = (avant !== "" && qs.includes(+avant)) ? avant
+            : (qs.includes(0) ? "0" : String(qs[0] ?? 0));
+
+  if (VOL_KIND !== k) {
+    VOL_KIND = k;
+    VOLUME = [];
+    const [tv, th] = await Promise.all([
+      Promise.all(moisRecents(2).map(m =>
+        charge(HIST + "data/volume/" + k + "/" + m + ".csv",
+               "data/volume/" + k + "/" + m + ".csv"))),
+      charge(LIVE + "heure_volume.csv", "live/heure_volume.csv")
+    ]);
+    tv.filter(Boolean).forEach(t => VOLUME.push(...csv(t)));
+    csv(th).filter(r => r.kind == k).forEach(r => VOLUME.push(r));
+    VOLUME = VOLUME.map(r => ({h: r.heure, q: +r.quality, p: num(r.prix),
+                               v: num(r.vendu) || 0, n: num(r.n_evt) || 0}))
+                   .filter(r => r.p != null);
+  }
   dessine();
 }
 
-/* ---------- primitives de dessin ----------------------------------- */
+/* ---------- dessin ------------------------------------------------- */
 
-const W = 880, H = 260, M = {t: 14, r: 54, b: 30, l: 56};
+const W = 880, H = 260, M = {t: 14, r: 54, b: 30, l: 62};
 
-function svg(inner, h) {
-  return '<svg viewBox="0 0 ' + W + ' ' + (h || H) + '" preserveAspectRatio="xMidYMid meet">' +
-    inner + '</svg>';
-}
+const svg = (inner, h) => '<svg viewBox="0 0 ' + W + ' ' + (h || H) +
+  '" preserveAspectRatio="xMidYMid meet">' + inner + '</svg>';
 
 function echelle(min, max, taille) {
   if (min === max) { min -= 1; max += 1; }
@@ -301,142 +354,224 @@ function ticks(min, max, n) {
   return out;
 }
 
-function grille(vals, y, dec, largeur) {
-  return vals.map(v =>
-    '<line class="gl" x1="0" y1="' + y(v).toFixed(1) + '" x2="' + largeur +
-    '" y2="' + y(v).toFixed(1) + '"/>' +
-    '<text class="tk r" x="-8" y="' + (y(v) + 4).toFixed(1) + '">' + (dec === null ? prix(v) : fmt(v, dec)) + '</text>'
-  ).join("");
+const grille = (vals, y, dec, lw) => vals.map(v =>
+  '<line class="gl" x1="0" y1="' + y(v).toFixed(1) + '" x2="' + lw +
+  '" y2="' + y(v).toFixed(1) + '"/><text class="tk r" x="-8" y="' +
+  (y(v) + 4).toFixed(1) + '">' + (dec === null ? prix(v) : fmt(v, dec)) +
+  '</text>').join("");
+
+const vide = m => '<p class="dim" style="padding:26px 0 34px;text-align:center">' + m + '</p>';
+
+function axeTemps(p, x, lh) {
+  const n = Math.min(6, p.length), out = [];
+  for (let j = 0; j < n; j++) {
+    const i = Math.round(j / (n - 1 || 1) * (p.length - 1)), h = p[i].h;
+    out.push('<text class="tk m" x="' + x(i).toFixed(1) + '" y="' + (lh + 18) + '">' +
+      h.slice(8, 10) + "/" + h.slice(5, 7) + " " + h.slice(11, 13) + "h</text>");
+  }
+  return out.join("");
+}
+
+function survol(el, cle, p, lw, texte) {
+  const hit = el.querySelector("#hit_" + cle), cr = el.querySelector("#cr_" + cle),
+        tip = document.getElementById("t_" + cle);
+  if (!hit) return;
+  hit.addEventListener("mousemove", e => {
+    const r = hit.getBoundingClientRect();
+    const i = Math.max(0, Math.min(p.length - 1,
+      Math.round((e.clientX - r.left) / r.width * (p.length - 1))));
+    const xs = i / (p.length - 1 || 1) * lw;
+    if (cr) { cr.setAttribute("x1", xs); cr.setAttribute("x2", xs); cr.setAttribute("opacity", "1"); }
+    tip.innerHTML = texte(i);
+    tip.style.opacity = "1";
+    const c = el.parentElement.getBoundingClientRect();
+    tip.style.left = Math.min(c.width - 180, Math.max(8, e.clientX - c.left + 12)) + "px";
+    tip.style.top = (e.clientY - c.top - 6) + "px";
+  });
+  hit.addEventListener("mouseleave", () => {
+    if (cr) cr.setAttribute("opacity", "0");
+    tip.style.opacity = "0";
+  });
 }
 
 /* ---------- le rendu ----------------------------------------------- */
 
 function dessine() {
   const k = document.getElementById("res").value;
-  const q = document.getElementById("qual").value;
-  const jours = Number(document.getElementById("jours").value);
-  let pts = PARCLE.get(k + "|" + q) || [];
+  const q = +document.getElementById("qual").value;
+  const jours = +document.getElementById("jours").value;
 
+  let pts = HORAIRE.get(k + "|" + q) || [];
+  let depuis = "";
   if (jours < 999 && pts.length) {
     const fin = new Date(pts[pts.length - 1].h + ":00:00Z").getTime();
-    pts = pts.filter(p => new Date(p.h + ":00:00Z").getTime() >= fin - jours * 864e5);
+    depuis = new Date(fin - jours * 864e5).toISOString().slice(0, 13);
+    pts = pts.filter(p => p.h >= depuis);
   }
+  const carnet = ORDRES.filter(o => o.k == k && o.q === q)
+                       .sort((a, b) => a.p - b.p);
 
-  kpis(pts, k, q);
+  kpis(pts, carnet);
+  volumeParPrix(q, depuis, jours);
   courbePrix(pts);
   courbeProfondeur(pts);
   profilHoraire(k, q);
   echelleQualite(k);
-  netVente(pts);
+  tableCarnet(carnet);
+  netVente(carnet, pts);
   tableau(pts);
 }
 
-/* --- les indicateurs du haut --- */
-function kpis(pts, k, q) {
+function kpis(pts, carnet) {
+  const box = document.getElementById("kpis");
+  const meilleur = carnet.length ? carnet[0].p : null;
   const avecPrix = pts.filter(p => p.c != null);
   const der = avecPrix[avecPrix.length - 1];
-  const box = document.getElementById("kpis");
-  if (!der) {
-    box.innerHTML = '<div class="kpi"><div class="k">Prix</div><div class="v">—</div>' +
-      '<div class="n">Pas encore de releve pour ce niveau de qualite.</div></div>';
-    return;
-  }
-  const t24 = new Date(der.h + ":00:00Z").getTime() - 24 * 3600e3;
-  const ref = avecPrix.filter(p => new Date(p.h + ":00:00Z").getTime() <= t24).pop();
-  const var24 = ref ? (der.c / ref.c - 1) * 100 : null;
-  const prof = [...pts].reverse().find(p => p.prof != null);
-  const volJour = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > t24)
-    .reduce((s, p) => s + p.vol, 0);
-  const bas = Math.min(...avecPrix.map(p => p.lo ?? p.c));
-  const haut = Math.max(...avecPrix.map(p => p.hi ?? p.c));
+  const p24 = der ? new Date(der.h + ":00:00Z").getTime() - 24 * 3600e3 : 0;
+  const ref = avecPrix.filter(p => new Date(p.h + ":00:00Z").getTime() <= p24).pop();
+  const base = meilleur ?? (der && der.c);
+  const var24 = (ref && base) ? (base / ref.c - 1) * 100 : null;
+  const prof = carnet.length
+    ? carnet.filter(o => o.p <= carnet[0].p * 1.05).reduce((s, o) => s + o.qt, 0)
+    : null;
+  const v24 = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24)
+                 .reduce((s, p) => s + p.vendu, 0);
+  const r24 = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24)
+                 .reduce((s, p) => s + p.retire, 0);
 
   box.innerHTML = [
-    ['Dernier prix', prix(der.c) + ' $', der.h.replace("T", " a ") + " h UTC"],
-    ['Variation 24 h', var24 == null ? '—' :
-      '<span class="' + (var24 >= 0 ? 'up' : 'down') + '">' +
-      (var24 >= 0 ? '+' : '') + fmt(var24, 2) + ' %</span>',
-      ref ? 'depuis ' + prix(ref.c) + ' $' : 'pas assez de recul'],
-    ['Amplitude sur la periode', prix(bas) + ' – ' + prix(haut) + ' $',
-      bas > 0 ? 'ecart de ' + fmt((haut / bas - 1) * 100, 1) + ' %' : 'ecart non calculable'],
-    ['Profondeur a -5 %', prof ? ent(prof.prof) + ' u' : '—',
-      'ecoulable sans casser le prix'],
-    ['Volume 24 h', volJour ? ent(volJour) + ' u' : '—',
-      volJour ? 'unites parties du carnet' : 'se remplit avec le temps']
-  ].map(([a, b, c]) =>
-    '<div class="kpi"><div class="k">' + a + '</div><div class="v">' + b +
-    '</div><div class="n">' + c + '</div></div>').join("");
+    ["Meilleur prix", prix(base) + " $", carnet.length ? "carnet " + AGE : "dernier releve"],
+    ["Variation 24 h", var24 == null ? "—" :
+      '<span class="' + (var24 >= 0 ? "up" : "down") + '">' +
+      (var24 >= 0 ? "+" : "") + fmt(var24, 2) + " %</span>",
+      ref ? "depuis " + prix(ref.c) + " $" : "pas assez de recul"],
+    ["Profondeur a -5 %", prof != null ? ent(prof) + " u" : "—",
+      carnet.length + " offres en vente"],
+    ["Vendu sur 24 h", v24 ? ent(v24) + " u" : "—",
+      v24 ? "soit " + ent(v24 * (base || 0)) + " $" : "se remplit avec le temps"],
+    ["Retire du marche", r24 ? ent(r24) + " u" : "—",
+      "offres annulees par leurs vendeurs"]
+  ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
+    b + '</div><div class="n">' + c + '</div></div>').join("");
 }
 
-/* --- courbe de prix, avec bande haut/bas --- */
+/* --- LE graphique : le volume echange a chaque prix --- */
+function volumeParPrix(q, depuis, jours) {
+  const el = document.getElementById("c_vol");
+  const lignes = VOLUME.filter(r => r.q === q && (!depuis || r.h >= depuis));
+  const par = new Map();
+  for (const r of lignes) par.set(r.p, (par.get(r.p) || 0) + r.v);
+  const pts = [...par.entries()].map(([p, v]) => ({p, v}))
+                                .sort((a, b) => a.p - b.p);
+  const total = pts.reduce((s, x) => s + x.v, 0);
+
+  document.getElementById("h_vol").textContent = pts.length
+    ? "Combien d'unites sont parties a chaque prix sur la periode : " +
+      ent(total) + " au total. Les baisses de quantite sont des ventes certaines ; " +
+      "les offres disparues ne sont comptees que si elles etaient les moins cheres."
+    : "Aucune vente enregistree sur cette periode pour ce niveau de qualite.";
+
+  if (!pts.length) { el.innerHTML = vide("Pas encore de vente observee."); return; }
+
+  const lh = 210, lw = W - M.l - M.r;
+  const max = Math.max(...pts.map(x => x.v));
+  const y = echelle(0, max, lh);
+  const bw = lw / pts.length;
+  const large = Math.min(bw - 4, 58);          // pas de blocs enormes a 3 paliers
+  const dec = (bw - large) / 2;
+  const gros = pts.reduce((a, b) => b.v > a.v ? b : a);
+
+  const barres = pts.map((d, i) => {
+    const y1 = y(d.v), y0 = y(0);
+    return '<rect x="' + (i * bw + dec).toFixed(1) + '" y="' + y1.toFixed(1) +
+      '" width="' + Math.max(large, 1).toFixed(1) + '" height="' +
+      Math.max(y0 - y1, 1).toFixed(1) + '" rx="3" fill="var(--s1)"' +
+      (d === gros ? ' opacity="1"' : ' opacity=".82"') + '/>';
+  }).join("");
+
+  const n = Math.min(9, pts.length);
+  const ax = [];
+  for (let j = 0; j < n; j++) {
+    const i = Math.round(j / (n - 1 || 1) * (pts.length - 1));
+    ax.push('<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' +
+      (lh + 17) + '">' + prix(pts[i].p) + '</text>');
+  }
+  const iGros = pts.indexOf(gros);
+  const etiq = '<text class="lbl m" text-anchor="middle" x="' +
+    (iGros * bw + bw / 2).toFixed(1) + '" y="' + (y(gros.v) - 8).toFixed(1) +
+    '">' + ent(gros.v) + " u a " + prix(gros.p) + " $</text>";
+
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(0, max, 4), y, 0, lw) + barres + etiq +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
+    '" y2="' + y(0).toFixed(1) + '"/>' + ax.join("") +
+    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">prix de vente ($)</text>' +
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
+    '" fill="transparent" id="hit_vol"/></g>', lh + M.t + M.b + 16);
+
+  survol(el, "vol", pts, lw, i =>
+    "<b>" + ent(pts[i].v) + " u</b> echangees a " + prix(pts[i].p) + " $<br>" +
+    '<span class="dim">' + fmt(pts[i].v / total * 100, 1) + " % du volume</span>");
+}
+
 function courbePrix(pts) {
   const el = document.getElementById("c_prix");
   const p = pts.filter(x => x.c != null);
-  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de relevés."); return; }
-
+  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de releves."); return; }
   const lw = W - M.l - M.r, lh = H - M.t - M.b;
-  const lows = p.map(x => x.lo ?? x.c), highs = p.map(x => x.hi ?? x.c);
-  const min = Math.min(...lows), max = Math.max(...highs);
-  const y = echelle(min, max, lh);
-  const x = i => i / (p.length - 1) * lw;
-
-  const haut = p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1));
-  const bas = p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse();
-  const bande = '<polygon points="' + haut.concat(bas).join(" ") + '" fill="var(--band)"/>';
+  const min = Math.min(...p.map(x => x.lo ?? x.c)), max = Math.max(...p.map(x => x.hi ?? x.c));
+  const y = echelle(min, max, lh), x = i => i / (p.length - 1) * lw;
+  const bande = '<polygon points="' +
+    p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1))
+     .concat(p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse())
+     .join(" ") + '" fill="var(--band)"/>';
   const trait = '<polyline points="' + p.map((d, i) =>
     x(i).toFixed(1) + "," + y(d.c).toFixed(1)).join(" ") +
     '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>';
-
   const der = p[p.length - 1];
-  const pastille = '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(der.c).toFixed(1) +
+  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
+    grille(ticks(min, max, 4), y, null, lw) + bande + trait +
+    '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(der.c).toFixed(1) +
     '" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>' +
     '<text class="lbl" x="' + (x(p.length - 1) + 9).toFixed(1) + '" y="' +
-    (y(der.c) + 4).toFixed(1) + '">' + prix(der.c) + ' $</text>';
-
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 4), y, null, lw) + bande + trait + pastille +
+    (y(der.c) + 4).toFixed(1) + '">' + prix(der.c) + ' $</text>' +
     '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
     axeTemps(p, x, lh) +
     '<line id="cr_prix" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh + '" fill="transparent" id="hit_prix"/>' +
-    '</g>');
-  survol(el, "prix", p, lw, i =>
-    p[i].h.replace("T", " a ") + " h<br><b>" + prix(p[i].c) + " $</b>" +
-    (p[i].hi != null ? '<br><span class="dim">haut ' + prix(p[i].hi) +
-      " · bas " + prix(p[i].lo) + "</span>" : ""));
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
+    '" fill="transparent" id="hit_prix"/></g>');
+  survol(el, "prix", p, lw, i => p[i].h.replace("T", " a ") + " h<br><b>" +
+    prix(p[i].c) + " $</b>" + (p[i].hi != null ? '<br><span class="dim">haut ' +
+    prix(p[i].hi) + " · bas " + prix(p[i].lo) + "</span>" : "") +
+    (p[i].vendu ? "<br>" + ent(p[i].vendu) + " u vendues" : ""));
 }
 
-/* --- profondeur --- */
 function courbeProfondeur(pts) {
   const el = document.getElementById("c_prof");
   const p = pts.filter(x => x.prof != null);
-  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de relevés de carnet."); return; }
-
+  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de releves de carnet."); return; }
   const lh = 180, lw = W - M.l - M.r;
-  const max = Math.max(...p.map(d => d.prof)), min = 0;
-  const y = echelle(min, max, lh);
-  const x = i => i / (p.length - 1) * lw;
-  const aire = '<polygon points="0,' + y(0).toFixed(1) + " " +
-    p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
-    " " + lw + "," + y(0).toFixed(1) + '" fill="var(--band)"/>';
-  const trait = '<polyline points="' + p.map((d, i) =>
-    x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
-    '" fill="none" stroke="var(--s1)" stroke-width="2"/>';
-
+  const max = Math.max(...p.map(d => d.prof));
+  const y = echelle(0, max, lh), x = i => i / (p.length - 1) * lw;
   el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 3), y, 0, lw) + aire + trait +
+    grille(ticks(0, max, 3), y, 0, lw) +
+    '<polygon points="0,' + y(0).toFixed(1) + " " +
+    p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
+    " " + lw + "," + y(0).toFixed(1) + '" fill="var(--band)"/>' +
+    '<polyline points="' + p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1))
+      .join(" ") + '" fill="none" stroke="var(--s1)" stroke-width="2"/>' +
     '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
     axeTemps(p, x, lh) +
     '<line id="cr_prof" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh + '" fill="transparent" id="hit_prof"/>' +
-    '</g>', lh + M.t + M.b);
-  survol(el, "prof", p, lw, i =>
-    p[i].h.replace("T", " a ") + " h<br><b>" + ent(p[i].prof) + " u</b> a moins de 5 %");
+    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
+    '" fill="transparent" id="hit_prof"/></g>', lh + M.t + M.b);
+  survol(el, "prof", p, lw, i => p[i].h.replace("T", " a ") + " h<br><b>" +
+    ent(p[i].prof) + " u</b> a moins de 5 %");
 }
 
-/* --- profil par heure de la journee : le graphique qui rapporte --- */
 function profilHoraire(k, q) {
   const el = document.getElementById("c_heure");
-  const tous = PARCLE.get(k + "|" + q) || [];
+  const tous = HORAIRE.get(k + "|" + q) || [];
   const parJour = new Map();
   for (const p of tous) {
     if (p.c == null) continue;
@@ -446,172 +581,133 @@ function profilHoraire(k, q) {
   }
   const acc = Array.from({length: 24}, () => []);
   let nJours = 0;
-  for (const [, lignes] of parJour) {
-    if (lignes.length < 6) continue;      // journee trop incomplete
+  for (const [, l] of parJour) {
+    if (l.length < 6) continue;
     nJours++;
-    const moy = lignes.reduce((s, p) => s + p.c, 0) / lignes.length;
-    for (const p of lignes) acc[Number(p.h.slice(11, 13))].push((p.c / moy - 1) * 100);
+    const moy = l.reduce((s, p) => s + p.c, 0) / l.length;
+    for (const p of l) acc[+p.h.slice(11, 13)].push((p.c / moy - 1) * 100);
   }
-  const med = acc.map(a => a.length ? a.slice().sort((x, y) => x - y)[Math.floor(a.length / 2)] : null);
+  const med = acc.map(a => a.length ? a.slice().sort((x, y) => x - y)[a.length >> 1] : null);
   const dispo = med.filter(v => v != null);
-
-  document.getElementById("h_prof").textContent = nJours < 2
-    ? "Ecart moyen du prix par rapport a la moyenne du jour, heure par heure (UTC). " +
-      "Base sur " + nJours + " journee(s) : beaucoup trop peu pour en tirer une regle. Reviens dans quelques jours."
-    : "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC), sur " +
-      nJours + " journees. Au-dessus de zero : le prix y est habituellement plus haut.";
-
+  document.getElementById("h_heure").textContent = nJours < 3
+    ? "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC). " +
+      "Base sur " + nJours + " journee(s) : trop peu pour en tirer une regle."
+    : "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC), " +
+      "sur " + nJours + " journees. Au-dessus de zero : le prix y est habituellement plus haut.";
   if (dispo.length < 4) { el.innerHTML = vide("Pas encore assez d'heures couvertes."); return; }
 
   const lh = 190, lw = W - M.l - M.r;
   const max = Math.max(...dispo, 0.5), min = Math.min(...dispo, -0.5);
-  const y = echelle(min, max, lh);
-  const bw = lw / 24;
-  const barres = med.map((v, h) => {
-    if (v == null) return "";
-    const y0 = y(0), y1 = y(v);
-    const ht = Math.max(Math.abs(y1 - y0), 1.5);
-    const col = v >= 0 ? "var(--s1)" : "var(--s2)";
-    return '<rect x="' + (h * bw + 2).toFixed(1) + '" y="' + Math.min(y0, y1).toFixed(1) +
-      '" width="' + (bw - 4).toFixed(1) + '" height="' + ht.toFixed(1) +
-      '" rx="3" fill="' + col + '"/>';
-  }).join("");
-  const ax = med.map((v, h) => h % 3 === 0
-    ? '<text class="tk m" x="' + (h * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
-      String(h).padStart(2, "0") + "</text>" : "").join("");
-
+  const y = echelle(min, max, lh), bw = lw / 24;
   el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 4), y, 2, lw) + barres +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' + y(0).toFixed(1) + '"/>' +
-    ax + '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 30) + '">heure UTC</text>' +
+    grille(ticks(min, max, 4), y, 2, lw) +
+    med.map((v, h) => v == null ? "" :
+      '<rect x="' + (h * bw + 2).toFixed(1) + '" y="' + Math.min(y(0), y(v)).toFixed(1) +
+      '" width="' + (bw - 4).toFixed(1) + '" height="' +
+      Math.max(Math.abs(y(v) - y(0)), 1.5).toFixed(1) + '" rx="3" fill="' +
+      (v >= 0 ? "var(--s1)" : "var(--s2)") + '"/>').join("") +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
+    '" y2="' + y(0).toFixed(1) + '"/>' +
+    med.map((v, h) => h % 3 === 0 ? '<text class="tk m" x="' +
+      (h * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
+      String(h).padStart(2, "0") + "</text>" : "").join("") +
+    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 30) + '">heure UTC</text>' +
     '</g>', lh + M.t + M.b + 14);
 }
 
-/* --- echelle de qualite --- */
 function echelleQualite(k) {
   const el = document.getElementById("c_qual");
-  const lignes = [];
-  for (const [cle, v] of PARCLE) {
-    if (cle.split("|")[0] !== String(k)) continue;
-    const der = [...v].reverse().find(p => p.c != null);
-    if (der) lignes.push({q: Number(cle.split("|")[1]), p: der.c, h: der.h});
+  const par = new Map();
+  for (const o of ORDRES) {
+    if (o.k != k) continue;
+    if (!par.has(o.q) || o.p < par.get(o.q).p) par.set(o.q, o);
   }
-  lignes.sort((a, b) => a.q - b.q);
-  if (lignes.length < 2) { el.innerHTML = vide("Une seule qualite observee pour cette ressource."); return; }
-
+  const l = [...par.entries()].map(([q, o]) => ({q, p: o.p})).sort((a, b) => a.q - b.q);
+  if (l.length < 2) { el.innerHTML = vide("Une seule qualite en vente actuellement."); return; }
   const lh = 180, lw = W - M.l - M.r;
-  const max = Math.max(...lignes.map(l => l.p));
-  const y = echelle(0, max, lh);
-  const bw = lw / lignes.length;
-  const base = lignes.find(l => l.q === 0);
-  const barres = lignes.map((l, i) => {
-    const y1 = y(l.p), y0 = y(0);
-    const ecart = base ? (l.p / base.p - 1) * 100 : null;
-    return '<rect x="' + (i * bw + 3).toFixed(1) + '" y="' + y1.toFixed(1) +
-      '" width="' + (bw - 6).toFixed(1) + '" height="' + (y0 - y1).toFixed(1) +
-      '" rx="4" fill="var(--s1)"/>' +
-      '<text class="lbl m" text-anchor="middle" x="' + (i * bw + bw / 2).toFixed(1) +
-      '" y="' + (y1 - 7).toFixed(1) + '">' + prix(l.p) + '</text>' +
-      (ecart && Math.abs(ecart) > 0.5
-        ? '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (y1 - 21).toFixed(1) +
-          '">' + (ecart > 0 ? "+" : "") + fmt(ecart, 0) + ' %</text>' : "") +
-      '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
-      l.q + (l.q === 0 ? "" : "★") + '</text>';
-  }).join("");
-
+  const max = Math.max(...l.map(x => x.p));
+  const y = echelle(0, max, lh), bw = lw / l.length;
+  const base = l.find(x => x.q === 0);
   el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, max, 3), y, null, lw) + barres +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' + y(0).toFixed(1) + '"/>' +
-    '</g>', lh + M.t + M.b + 6);
+    grille(ticks(0, max, 3), y, null, lw) +
+    l.map((d, i) => {
+      const ec = base ? (d.p / base.p - 1) * 100 : null;
+      return '<rect x="' + (i * bw + 3).toFixed(1) + '" y="' + y(d.p).toFixed(1) +
+        '" width="' + (bw - 6).toFixed(1) + '" height="' + (y(0) - y(d.p)).toFixed(1) +
+        '" rx="4" fill="var(--s1)"/><text class="lbl" text-anchor="middle" x="' +
+        (i * bw + bw / 2).toFixed(1) + '" y="' + (y(d.p) - 7).toFixed(1) + '">' +
+        prix(d.p) + '</text>' +
+        (ec && Math.abs(ec) > 0.5 ? '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) +
+          '" y="' + (y(d.p) - 21).toFixed(1) + '">' + (ec > 0 ? "+" : "") +
+          fmt(ec, 0) + ' %</text>' : "") +
+        '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) +
+        '">' + d.q + (d.q === 0 ? "" : "★") + '</text>';
+    }).join("") +
+    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
+    '" y2="' + y(0).toFixed(1) + '"/></g>', lh + M.t + M.b + 6);
 }
 
-/* --- le net reellement encaisse --- */
-function netVente(pts) {
+function tableCarnet(carnet) {
+  const t = document.getElementById("t_carnet");
+  document.getElementById("h_carnet").textContent = carnet.length
+    ? carnet.length + " offres en vente, mises a jour " + AGE +
+      ". La colonne variation montre ce qui est parti depuis le passage precedent."
+    : "Aucune offre en vente pour ce niveau de qualite.";
+  const l = carnet.slice(0, 15);
+  t.innerHTML = '<tr><th>Prix</th><th>Quantite</th><th>Variation</th>' +
+    '<th>Vendeur</th><th>En ligne depuis</th></tr>' +
+    (l.length ? l.map(o => {
+      const heures = (Date.now() - new Date(o.vu).getTime()) / 3600e3;
+      return '<tr><td>' + prix(o.p) + ' $</td><td>' + ent(o.qt) + '</td><td>' +
+        (o.d ? '<span class="down">' + ent(o.d) + "</span>" : '<span class="dim">—</span>') +
+        '</td><td class="dim">' + o.sid + '</td><td>' +
+        (isFinite(heures) ? fmt(heures, 1) + " h" : "—") + '</td></tr>';
+    }).join("") : '<tr><td colspan="5" class="dim">Rien a afficher.</td></tr>');
+}
+
+function netVente(carnet, pts) {
   const der = [...pts].reverse().find(p => p.c != null);
-  const tb = document.getElementById("t_net");
-  const nt = document.getElementById("n_net");
-  if (!der) { tb.innerHTML = ""; nt.textContent = "Pas de prix disponible."; return; }
-
-  const P = der.c;
-  const frais = Number(document.getElementById("i_frais").value) / 100;
-  const ptr = Number(document.getElementById("i_tr").value);
-  const tru = Number(document.getElementById("i_tru").value);
-  const qte = Number(document.getElementById("i_qte").value) || 0;
-
-  const netB = P * (1 - frais) - ptr * tru;        // bourse : frais + 1 transport/article
-  const netC = P - ptr * tru * 0.5;                // contrat : moitie moins de transport
-  const l = (t, n, d) =>
-    '<tr><td>' + t + '</td><td>' + fmt(n, 4) + ' $</td><td>' + fmt(n / P * 100, 1) +
-    ' %</td><td>' + ent(n * qte) + ' $</td><td class="dim">' + d + '</td></tr>';
-
-  tb.innerHTML = '<tr><th>Canal</th><th>Net par unite</th><th>Part du prix</th>' +
-    '<th>Sur ' + ent(qte) + ' u</th><th>Detail</th></tr>' +
+  const P = carnet.length ? carnet[0].p : (der && der.c);
+  const tb = document.getElementById("t_net"), nt = document.getElementById("n_net");
+  if (!P) { tb.innerHTML = ""; nt.textContent = "Pas de prix disponible."; return; }
+  const frais = +document.getElementById("i_frais").value / 100;
+  const ptr = +document.getElementById("i_tr").value;
+  const tru = +document.getElementById("i_tru").value;
+  const qte = +document.getElementById("i_qte").value || 0;
+  const netB = P * (1 - frais) - ptr * tru;
+  const netC = P - ptr * tru * 0.5;
+  const l = (t, n, d) => '<tr><td>' + t + '</td><td>' + fmt(n, 4) + ' $</td><td>' +
+    fmt(n / P * 100, 1) + ' %</td><td>' + ent(n * qte) + ' $</td><td class="dim">' +
+    d + '</td></tr>';
+  tb.innerHTML = '<tr><th>Canal</th><th>Net par unite</th><th>Part du prix</th><th>Sur ' +
+    ent(qte) + ' u</th><th>Detail</th></tr>' +
     l("Contrat direct", netC, "prix &minus; " + fmt(ptr * tru * 0.5, 4) + " de transport") +
     l("Bourse", netB, fmt(frais * 100, 1) + " % de frais + " + fmt(ptr * tru, 4) + " de transport");
-
-  const gain = (netC - netB) * qte;
   nt.innerHTML = "Au prix actuel de <b>" + prix(P) + " $</b>, le contrat rapporte <b>" +
     fmt(netC - netB, 4) + " $ de plus par unite</b> qu'une vente en bourse, soit <b>" +
-    ent(gain) + " $</b> sur " + ent(qte) + " unites. " +
-    "Autrement dit tu peux vendre en contrat jusqu'a <b>" + prix(netB + ptr * tru * 0.5) +
+    ent((netC - netB) * qte) + " $</b> sur " + ent(qte) + " unites. " +
+    "Tu peux donc vendre en contrat jusqu'a <b>" + prix(netB + ptr * tru * 0.5) +
     " $</b> — soit " + fmt((netB + ptr * tru * 0.5) / P * 100 - 100, 2) +
     " % sous le marche — et encaisser autant qu'en bourse au prix affiche.";
 }
 
-/* --- tableau --- */
 function tableau(pts) {
-  const p = pts.slice(-20).reverse();
+  const p = pts.slice(-24).reverse();
   document.getElementById("t_tab").innerHTML =
     '<tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th><th>Cloture</th>' +
-    '<th>Releves</th><th>Volume</th><th>Profondeur -5 %</th></tr>' +
-    (p.length ? p.map(d =>
-      '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" + prix(d.o) + "</td><td>" +
-      prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" + prix(d.c) + "</td><td>" +
-      d.n + "</td><td>" + (d.vol ? ent(d.vol) : '<span class="dim">—</span>') + "</td><td>" +
-      (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') + "</td></tr>").join("")
-      : '<tr><td colspan="8" class="dim">Rien a afficher.</td></tr>');
-}
-
-/* --- utilitaires --- */
-function vide(msg) {
-  return '<p class="dim" style="padding:26px 0 34px;text-align:center">' + msg + "</p>";
-}
-
-function axeTemps(p, x, lh) {
-  const n = Math.min(6, p.length);
-  const out = [];
-  for (let j = 0; j < n; j++) {
-    const i = Math.round(j / (n - 1) * (p.length - 1));
-    const h = p[i].h;
-    out.push('<text class="tk m" x="' + x(i).toFixed(1) + '" y="' + (lh + 18) + '">' +
-      h.slice(8, 10) + "/" + h.slice(5, 7) + " " + h.slice(11, 13) + "h</text>");
-  }
-  return out.join("");
-}
-
-function survol(el, cle, p, lw, texte) {
-  const hit = el.querySelector("#hit_" + cle);
-  const cr = el.querySelector("#cr_" + cle);
-  const tip = document.getElementById("t_" + cle);
-  if (!hit) return;
-  hit.addEventListener("mousemove", e => {
-    const r = hit.getBoundingClientRect();
-    const f = (e.clientX - r.left) / r.width;
-    const i = Math.max(0, Math.min(p.length - 1, Math.round(f * (p.length - 1))));
-    const xs = i / (p.length - 1) * lw;
-    cr.setAttribute("x1", xs); cr.setAttribute("x2", xs); cr.setAttribute("opacity", "1");
-    tip.innerHTML = texte(i);
-    tip.style.opacity = "1";
-    const c = el.parentElement.getBoundingClientRect();
-    tip.style.left = Math.min(c.width - 170, Math.max(8, e.clientX - c.left + 12)) + "px";
-    tip.style.top = (e.clientY - c.top - 6) + "px";
-  });
-  hit.addEventListener("mouseleave", () => {
-    cr.setAttribute("opacity", "0"); tip.style.opacity = "0";
-  });
+    '<th>Offres</th><th>Vendu</th><th>Retire</th><th>Profondeur -5 %</th></tr>' +
+    (p.length ? p.map(d => '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" +
+      prix(d.o) + "</td><td>" + prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" +
+      prix(d.c) + "</td><td>" + (d.n ?? "—") + "</td><td>" +
+      (d.vendu ? ent(d.vendu) : '<span class="dim">—</span>') + "</td><td>" +
+      (d.retire ? ent(d.retire) : '<span class="dim">—</span>') + "</td><td>" +
+      (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') +
+      "</td></tr>").join("") :
+      '<tr><td colspan="9" class="dim">Rien a afficher.</td></tr>');
 }
 
 demarrer();
+setInterval(() => location.reload(), 5 * 60 * 1000);   // le carnet bouge toutes les 5 min
 </script>
 </body>
 </html>
