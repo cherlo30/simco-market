@@ -38,17 +38,17 @@ jobs:
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
-          # Rationnement : le jeu donne ~10 requetes, et ne recharge
-          # QUE pendant le silence. On tire donc une salve, on se tait, on
-          # recommence — au lieu d'espacer pour rien.
-          RATION: "9"         # requetes par salve (s'ajuste tout seul)
-          RATION_MIN: "4"
-          RATION_MAX: "14"
-          PAUSE: "7.5"        # silence entre deux salves
-          PENALITE: "12"      # silence apres un refus
-          DELAY: "0.15"       # ecart a l'interieur d'une salve
-          MONTEE: "150"       # succes d'affilee avant d'elargir la ration
-          VOIES: "1"          # requetes en vol simultanement
+          # MESURE sur le runner : le serveur accorde 10 lectures par
+          # minute, pas une de plus. On ne cherche donc plus a ruser — on
+          # vit dans la limite, ce qui rend les refus impossibles.
+          QUOTA: "10"         # lectures autorisees...
+          FENETRE: "60"       # ...par tranche de X secondes
+          QUOTA_MIN: "5"      # plancher si le serveur se resserre
+          MARGE: "0.3"        # coussin de securite, en secondes
+          # market-ticker rend les 142 prix en UNE requete : un dixieme du
+          # budget tient donc TOUS les prix a jour a la minute, et les neuf
+          # autres vont aux carnets detailles (qualite, profondeur, volumes).
+          TICKER_SEC: "60"
           LIVE_SEC: "300"
 
       - name: filet de securite
