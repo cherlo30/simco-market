@@ -107,6 +107,7 @@ DELAI_MAX = float(os.environ.get("DELAI_MAX", "8.0"))
 SONDE = int(os.environ.get("SONDE", "40"))
 
 N429 = [0]
+AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0}
 _echecs = [0]
 _succes = [0]
 _vus = [DELAI[0], DELAI[0]]        # le plus bas et le plus haut atteints
@@ -156,6 +157,11 @@ def attendre_son_tour():
 # ---------------------------------------------------------------- reseau
 
 def fetch(url, tries=3, cadence=False):
+    # Une meme ressource peut etre refusee ses 3 tentatives d'affilee. Si
+    # chacune faisait monter le rythme, UNE ressource indisponible suffirait a
+    # doubler le delai de toutes les autres. On ne compte donc que le premier
+    # refus de cette ressource-ci ; les suivants sont le meme incident.
+    signale = False
     for i in range(tries):
         if cadence:
             attendre_son_tour()
@@ -168,7 +174,11 @@ def fetch(url, tries=3, cadence=False):
             return d
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                rythme_refus()
+                if not signale:
+                    rythme_refus()
+                    signale = True
+                else:
+                    N429[0] += 1
                 attente = 0.0
                 try:
                     attente = float(e.headers.get("Retry-After") or 0)
@@ -631,8 +641,10 @@ def main():
                 k, book, ts = t.result()
                 if book:
                     traiter(k, book, ordres, agg, volp, ts)
+                    AVANCEE["lues"] += 1
                 else:
                     refusees.append(k)
+                    AVANCEE["refusees"].append(k)
                 if time.time() - etat["dernier_live"] > LIVE_SEC:
                     etat["dernier_live"] = time.time()
                     fermer_et_envoyer(ordres, agg, volp)
@@ -642,6 +654,7 @@ def main():
         tour += 1
         t0 = time.time()
         limite = debut + DUREE
+        AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour)
         refusees = lot(kinds, ordres, agg, volp, limite)
 
         # On ne laisse pas tomber une ressource refusee : on y revient en fin
@@ -697,7 +710,14 @@ def fermer_et_envoyer(ordres, agg, volp, final=False):
         "heure_volume.csv": en_csv(EN_VOLUME, lignes_volume(volp)),
     })
     if ok:
-        print(f"  carnet envoye ({len(ordres)} ordres)" +
+        av = ""
+        if AVANCEE["total"]:
+            r = AVANCEE["refusees"]
+            av = (f" · tour {AVANCEE['tour']} : {AVANCEE['lues']}/"
+                  f"{AVANCEE['total']} ressources lues, rythme {DELAI[0]:.2f} s"
+                  + (f", {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
+                     + (" ..." if len(r) > 10 else "") if r else ", aucun refus"))
+        print(f"  carnet envoye ({len(ordres)} ordres){av}" +
               (" — dernier envoi" if final else ""))
 
 
