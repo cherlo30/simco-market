@@ -68,7 +68,6 @@ milliers d'unites par heure, les disparitions des centaines de milliers.
 Melangees, la deduction ecraserait la mesure.
 """
 import csv, functools, glob, io, json, os, subprocess, sys, threading, time
-from concurrent.futures import ThreadPoolExecutor
 import urllib.request, urllib.error
 from datetime import datetime, timedelta, timezone
 
@@ -85,55 +84,32 @@ BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
 
 # ---------------------------------------------------------- le bon rythme
 #
-# Ce qu'on a MESURE sur le serveur du jeu, en le sondant depuis un navigateur :
+# MESURE, sur le runner, avec des ressources jamais reutilisees (donc sans
+# cache pour fausser le compte) :
 #
-#   - une reserve d'environ 10 requetes, qui se remplit quand on se tait
-#   - CHAQUE requete consomme un jeton, y compris celles qui sont refusees
-#   - un refus declenche une penalite de quelques secondes, et toute nouvelle
-#     tentative pendant cette penalite la RELANCE
+#   - dix lectures acceptees par minute, pas une de plus
+#   - au-dela, le serveur refuse ; les refus sont gratuits mais inutiles
+#   - 1096 requetes forcees en 7 minutes n'ont jamais donne plus de 10,7
+#     lectures par minute
 #
-# Tenu a 0,55 s : 78 % de refus. Tenu a 2,50 s : encore 58 %. Autrement dit
-# ralentir ne repare presque rien. Mais apres six secondes de silence complet,
-# neuf requetes repassent d'un coup.
+# Il n'y a donc rien a gagner a pousser : la seule chose intelligente est de
+# ne JAMAIS depasser, et de bien choisir ce qu'on demande. D'ou la fenetre
+# glissante ci-dessous, qui rend un refus structurellement impossible.
 #
-# La conclusion est donc a l'oppose de ce qu'on croyait : ce qui compte n'est
-# pas de ralentir, c'est de SE TAIRE des qu'on se fait refuser. En simulation,
-# six secondes de silence font passer le debit de 1,9 a 88,8 ressources par
-# minute — quarante-sept fois mieux, avec le meme ecart entre requetes.
-#
-# Le rythme, lui, reste bas et bouge peu : il descend a chaque succes, monte
-# un peu a chaque refus, et c'est tout. Le silence fait le gros du travail.
-# Le log de production a tranche : les refus tombent a la 11e requete, puis
-# a la 22e, puis a la 33e. Un intervalle EXACTEMENT regulier. Ca veut dire que
-# la reserve ne se remplit pas pendant qu'on parle : espacer les requetes ne
-# rapporte donc rien du tout, on paye l'attente sans rien recuperer.
-#
-#   reserve d'environ 10 requetes + remplissage seulement quand on se tait
-#
-# La bonne strategie n'est donc pas un rythme, c'est un RATIONNEMENT : on tire
-# ses 10 requetes le plus vite possible, puis on se tait le temps que la
-# reserve se refasse, et on recommence — sans jamais provoquer de refus.
-#
-#   142 ressources / 9 par salve = 16 salves x ~8 s = environ 2,2 min le tour,
-#   et zero refus, donc zero penalite qui s'auto-entretient.
-#
-# La ration s'ajuste toute seule : un refus la baisse d'un cran, et une longue
-# serie sans refus la remonte d'un cran pour retester la limite.
-RATION = [int(os.environ.get("RATION", "9"))]     # requetes par salve
-RATION_MIN = int(os.environ.get("RATION_MIN", "4"))
-RATION_MAX = int(os.environ.get("RATION_MAX", "14"))
-PAUSE = float(os.environ.get("PAUSE", "7.5"))     # silence entre deux salves
-PENALITE = float(os.environ.get("PENALITE", "12"))  # silence apres un refus
-ECART = float(os.environ.get("DELAY", "0.15"))    # a l'interieur d'une salve
-MONTEE = int(os.environ.get("MONTEE", "150"))     # succes d'affilee avant de
-                                                  # retenter une ration plus large
+# Et surtout : market-ticker rend les 142 prix en UNE requete. Un dixieme du
+# budget suffit donc a tenir tous les prix a jour a la minute ; le reste va
+# aux carnets detailles, qui seuls donnent la qualite, la profondeur et les
+# volumes.
+QUOTA = [int(os.environ.get("QUOTA", "10"))]      # lectures autorisees...
+FENETRE = float(os.environ.get("FENETRE", "60"))  # ...par tranche de X secondes
+QUOTA_MIN = int(os.environ.get("QUOTA_MIN", "5"))
+MARGE = float(os.environ.get("MARGE", "0.3"))     # petit coussin de securite
+TICKER_SEC = float(os.environ.get("TICKER_SEC", "60"))   # un ticker par minute
 
 N429 = [0]
+AVANCEE = {"lues": 0, "total": 0, "tickers": 0, "journal": 0.0, "refus": 0}
 
-# Ou passent les minutes ? Sans cette mesure on ne fait que supposer. Chaque
-# seconde du tour tombe dans exactement une case, et le tour affiche le detail.
-CHRONO = {"attente": 0.0, "reseau": 0.0, "traitement": 0.0, "envoi": 0.0,
-          "penalite": 0.0}
+CHRONO = {"attente": 0.0, "reseau": 0.0, "traitement": 0.0, "envoi": 0.0}
 
 
 def chrono_zero():
@@ -142,101 +118,59 @@ def chrono_zero():
 
 
 def chrono_texte(total):
-    part = lambda v: f"{v/60:.1f} min ({v/total*100:.0f} %)" if total > 0 else "—"
-    return (f"attente cadence {part(CHRONO['attente'])}"
-            f" · penalites {part(CHRONO['penalite'])}"
-            f" · reseau {part(CHRONO['reseau'])}"
-            f" · traitement {part(CHRONO['traitement'])}"
-            f" · envois {part(CHRONO['envoi'])}")
+    p = lambda v: f"{v/60:.1f} min ({v/total*100:.0f} %)" if total > 0 else "—"
+    return (f"attente quota {p(CHRONO['attente'])} · reseau {p(CHRONO['reseau'])}"
+            f" · traitement {p(CHRONO['traitement'])} · envois {p(CHRONO['envoi'])}")
 
-AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0,
-           "refus_a": None, "ok_le_plus_vite": None, "silences": 0,
-           "journal": 0.0}
-_suite = [0]            # succes d'affilee depuis le dernier refus
-_vus = [RATION[0], RATION[0]]   # ration la plus basse / la plus haute vue
+
+_porte = threading.Lock()
+_recentes = []          # instants des requetes envoyees, fenetre glissante
+
+
+def attendre_son_tour():
+    """Ne laisse JAMAIS partir plus de QUOTA requetes par FENETRE secondes.
+    On ne subit donc pas la limite : on vit dedans. C'est la difference entre
+    demander la permission et se la faire refuser."""
+    while True:
+        with _porte:
+            maintenant = time.time()
+            while _recentes and _recentes[0] <= maintenant - FENETRE:
+                _recentes.pop(0)
+            if len(_recentes) < QUOTA[0]:
+                _recentes.append(maintenant)
+                return
+            # la place se libere quand la plus ancienne sort de la fenetre
+            attente = _recentes[0] + FENETRE - maintenant + MARGE
+        CHRONO["attente"] += attente
+        time.sleep(max(0.05, attente))
 
 
 def rythme_refus():
-    """Un refus veut dire qu'on a mal compte : on rend un jeton, on se tait
-    plus longtemps que d'habitude, et on repart sur une salve neuve."""
+    """Un refus veut dire que notre quota est trop genereux : on le baisse
+    d'un cran, definitivement pour ce run. Il n'y a pas de penalite a subir,
+    juste une estimation a corriger."""
     N429[0] += 1
-    AVANCEE["refus_a"] = RATION[0]
-    AVANCEE["silences"] += 1
-    _suite[0] = 0
-    RATION[0] = max(RATION_MIN, RATION[0] - 1)
-    _vus[0] = min(_vus[0], RATION[0])
-    with _porte:
-        _tire[0] = 0
-        _prochain[0] = max(_prochain[0], time.time()) + PENALITE
-        _punition[0] += PENALITE
+    AVANCEE["refus"] += 1
+    if QUOTA[0] > QUOTA_MIN:
+        QUOTA[0] -= 1
+        print(f"  refus : quota ramene a {QUOTA[0]} lectures par "
+              f"{FENETRE:.0f} s")
 
 
 def rythme_succes():
-    _suite[0] += 1
-    if _suite[0] >= MONTEE and RATION[0] < RATION_MAX:
-        RATION[0] += 1
-        _vus[1] = max(_vus[1], RATION[0])
-        _suite[0] = 0
-    v = AVANCEE["ok_le_plus_vite"]
-    AVANCEE["ok_le_plus_vite"] = RATION[0] if v is None else max(v, RATION[0])
+    pass
 
 
 def journal_avancee(force=False):
-    """Une ligne par minute : ou en est le tour, a quel rythme, ce qui passe,
-    ce qui refuse, et la limite qu'on a apprise."""
     if not force and time.time() - AVANCEE["journal"] < 60:
         return
     AVANCEE["journal"] = time.time()
     if not AVANCEE["total"]:
         return
-    r = AVANCEE["refusees"]
-    ok = AVANCEE["ok_le_plus_vite"]
-    ra = AVANCEE["refus_a"]
-    print(f"  tour {AVANCEE['tour']} : {AVANCEE['lues']}/{AVANCEE['total']} lues"
-          f" · salves de {RATION[0]} requetes puis {PAUSE:.0f} s de silence"
-          + (f" · la plus large qui passe {ok}" if ok is not None else "")
-          + (f" · refus a {ra}" if ra is not None else "")
-          + (f" · {AVANCEE['silences']} refus" if AVANCEE["silences"] else "")
-          + (f" · {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
-             + (" ..." if len(r) > 10 else "") if r else " · aucun refus"))
-
-
-# Nombre de requetes en vol en meme temps.
-#
-# Ca n'accelere PAS le rythme d'appel : le verrou ci-dessous impose toujours
-# le meme ecart entre deux departs. Ca supprime seulement le temps mort — on
-# n'attend plus la reponse du jeu sans rien faire avant de repartir.
-VOIES = int(os.environ.get("VOIES", "1"))
-
-_porte = threading.Lock()
-_prochain = [0.0]       # instant du prochain depart autorise
-_tire = [0]             # requetes deja tirees dans la salve en cours
-_punition = [0.0]       # secondes d'attente imputables a un refus
-
-
-def attendre_son_tour():
-    """Distribue les requetes par salves : RATION d'affilee, puis PAUSE de
-    silence complet. C'est ici, et nulle part ailleurs, que se decide le
-    debit."""
-    with _porte:
-        maintenant = time.time()
-        depart = max(maintenant, _prochain[0])
-        punition = _punition[0]
-        _punition[0] = 0.0
-        if _tire[0] >= RATION[0]:
-            depart += PAUSE        # la reserve se refait pendant ce silence
-            _tire[0] = 0
-        _tire[0] += 1
-        _prochain[0] = depart + ECART
-    if depart > maintenant:
-        dt = depart - maintenant
-        # on distingue l'attente normale de celle qu'un refus nous a coutee :
-        # c'est la seule facon de savoir si la cadence est trop lente ou si
-        # ce sont les refus qui mangent le tour
-        pun = min(dt, punition)
-        CHRONO["penalite"] += pun
-        CHRONO["attente"] += dt - pun
-        time.sleep(dt)
+    print(f"  {AVANCEE['tickers']} releve(s) de prix (142 produits chacun)"
+          f" · {AVANCEE['lues']} carnet(s) detaille(s)"
+          f" · quota {QUOTA[0]}/{FENETRE:.0f} s"
+          + (f" · {AVANCEE['refus']} refus" if AVANCEE["refus"] else ""))
 
 
 # ---------------------------------------------------------------- reseau
@@ -333,6 +267,13 @@ EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
 #        peut pas l'observer, mais on peut desormais le CHIFFRER.
 EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "disparu", "n_evt"]
 
+# Le flux de prix, alimente par market-ticker : les 142 produits en UNE
+# requete. C'est lui qui porte l'historique de prix, a la minute, pour tout le
+# marche. Les carnets detailles restent la source de la qualite, de la
+# profondeur et des volumes — mais ils n'ont plus a porter les prix.
+EN_PRIX = ["heure", "kind", "ouverture", "haut", "bas", "cloture", "n_releves"]
+EN_INSTANT = ["kind", "prix", "sens", "passage"]
+
 
 
 def en_csv(entete, lignes):
@@ -366,7 +307,8 @@ def lire_csv(texte, entete):
 
 
 # Comment deux enregistrements de la meme heure se combinent.
-SOMME = {"vendu", "disparu", "repose", "retire", "pose", "n_evt"}
+SOMME = {"vendu", "disparu", "repose", "retire", "pose", "n_evt",
+         "n_releves"}
 PLUS_HAUT = {"haut"}
 PLUS_BAS = {"bas"}
 PREMIER = {"ouverture"}          # garde la valeur la plus ancienne
@@ -406,7 +348,7 @@ def charger_live():
     r = git("fetch", "--depth=1", "--force", "origin", "live")
     if r.returncode != 0:
         print("  branche live absente — premier demarrage, on repart a neuf")
-        return {}, {}, {}
+        return {}, {}, {}, {}, {}
     def lire(nom, entete):
         s = git("show", f"FETCH_HEAD:{nom}")
         return lire_csv(s.stdout, entete) if s.returncode == 0 else []
@@ -431,9 +373,19 @@ def charger_live():
     for h, k, q, p, v, d, n in lire("heure_volume.csv", EN_VOLUME):
         volp[(h, int(k), int(q), float(p))] = [float(v), float(d), int(n)]
 
+    pxh = {}
+    for h, k, o, ha, ba, c, n in lire("heure_prix.csv", EN_PRIX):
+        pxh[(h, int(k))] = {"o": flt(o), "h": flt(ha), "b": flt(ba),
+                            "c": flt(c), "n": int(n or 0)}
+
+    instant = {}
+    for k, p, sens, psg in lire("prix.csv", EN_INSTANT):
+        instant[int(k)] = {"p": flt(p), "sens": sens, "passage": psg}
+
     print(f"  memoire reprise : {len(ordres)} ordres, "
-          f"{len(agg)} heures en cours, {len(volp)} paliers de prix")
-    return ordres, agg, volp
+          f"{len(agg)} heures en cours, {len(volp)} paliers de prix, "
+          f"{len(pxh)} heures de prix")
+    return ordres, agg, volp, pxh, instant
 
 
 def flt(x):
@@ -673,6 +625,40 @@ def traiter(kind, book, ordres, agg, volp, ts):
                 "depuis": iso(x.get("posted")) or ts, "passage": ts, "delta": ""}
 
 
+def traiter_ticker(tk, pxh, instant, ts):
+    """Une requete, 142 prix. On en tire l'ouverture, le haut, le bas et la
+    cloture de l'heure pour chaque produit — et l'etat du marche a l'instant."""
+    h = heure_de(ts)
+    for e in tk:
+        k = int(e["kind"])
+        p = flt(e.get("price"))
+        if p is None:
+            continue
+        a = pxh.get((h, k))
+        if a is None:
+            a = pxh[(h, k)] = {"o": p, "h": p, "b": p, "c": p, "n": 0}
+        a["h"] = max(a["h"], p)
+        a["b"] = min(a["b"], p)
+        a["c"] = p
+        a["n"] += 1
+        instant[k] = {"p": p, "sens": "hausse" if e.get("is_up") else "baisse",
+                      "passage": ts}
+
+
+def lignes_prix(pxh, heures=None):
+    out = []
+    for (h, k), a in sorted(pxh.items()):
+        if heures is not None and h not in heures:
+            continue
+        out.append([h, k, a["o"], a["h"], a["b"], a["c"], a["n"]])
+    return out
+
+
+def lignes_instant(instant):
+    return [[k, v["p"], v["sens"], v["passage"]]
+            for k, v in sorted(instant.items())]
+
+
 def vendre(qte, prix, kind, q, h, agg, volp, certain=True):
     """certain=True : baisse partielle, c'est une vente mesuree.
        certain=False : offre disparue, c'est une vente deduite."""
@@ -721,99 +707,112 @@ def lignes_ordres(ordres):
 
 def main():
     debut = time.time()
-    ordres, agg, volp = charger_live()
+    ordres, agg, volp, pxh, instant = charger_live()
     reindexer(ordres)
 
-    tk = fetch(TICKER, tries=3)
-    kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
-    # le plafond du rythme se deduit du tour le plus long qu'on accepte :
-    # au-dela, on ne voit plus assez de mouvements pour que ca serve.
-    print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*(ECART+PAUSE/max(1,RATION[0]))/60:.1f} min "
-          f"(salves de {RATION[0]} requetes espacees de {ECART:.2f} s, "
-          f"puis {PAUSE:.0f} s de silence)")
+    tk = fetch(TICKER, tries=3, cadence=True)
+    kinds = sorted({int(r["kind"]) for r in tk}) if tk else list(range(1, 156))
+    if tk:
+        traiter_ticker(tk, pxh, instant, stamp())
+        AVANCEE["tickers"] += 1
+    AVANCEE["total"] = len(kinds)
 
-    tour = 0
-    etat = {"dernier_live": 0.0}
+    # Le budget est en REQUETES. Une seule sert les 142 prix ; toutes les
+    # autres vont aux carnets. On annonce donc les deux cadences separement,
+    # parce que ce sont deux choses differentes.
+    par_min = QUOTA[0] * 60.0 / FENETRE
+    carnets_min = max(0.0, par_min - 60.0 / TICKER_SEC)
+    print(f"{len(kinds)} produits suivis · {QUOTA[0]} requetes par "
+          f"{FENETRE:.0f} s")
+    print(f"  prix de TOUS les produits : toutes les {TICKER_SEC:.0f} s "
+          f"(une requete)")
+    print(f"  carnet detaille d'un produit : {carnets_min:.1f} par minute, "
+          f"soit le tour complet en {len(kinds)/max(carnets_min,1e-9):.0f} min")
 
-    def lot(liste, ordres, agg, volp, limite):
-        """Interroge une serie de ressources, plusieurs requetes en vol, et
-        applique les resultats un par un dans l'ordre d'arrivee. Renvoie
-        celles que le jeu a refusees."""
-        refusees = []
-        with ThreadPoolExecutor(max_workers=VOIES) as pool:
-            taches = {}
-            for k in liste:
-                if time.time() > limite:
-                    refusees.append(k)
-                    continue
-                # tries=1 : sur un refus on ne reessaie PAS sur place. La
-                # deuxieme tentative consommait un jeton de plus, se faisait
-                # refuser pareil, et coutait une penalite entiere a la
-                # ressource. La reprise de fin de tour s'en charge, une fois
-                # que le serveur a souffle.
-                taches[pool.submit(
-                    lambda kk=k: (kk, fetch(BOOK % (REALM, kk), tries=1,
-                                            cadence=True), stamp()))] = k
-            for t in taches:
-                k, book, ts = t.result()
-                if book:
-                    t_tr = time.time()
-                    traiter(k, book, ordres, agg, volp, ts)
-                    CHRONO["traitement"] += time.time() - t_tr
-                    AVANCEE["lues"] += 1
-                else:
-                    refusees.append(k)
-                    AVANCEE["refusees"].append(k)
-                journal_avancee()
-                if time.time() - etat["dernier_live"] > LIVE_SEC:
-                    etat["dernier_live"] = time.time()
-                    t_en = time.time()
-                    fermer_et_envoyer(ordres, agg, volp)
-                    CHRONO["envoi"] += time.time() - t_en
-        return refusees
+    # Priorite : on relit en premier le carnet qu'on a laisse le plus
+    # longtemps sans nouvelles — et on double la priorite d'un produit dont le
+    # ticker signale que le prix a bouge depuis sa derniere lecture. Le ticker
+    # sert ainsi de radar : il coute une requete et oriente les neuf autres.
+    jamais = debut - 86400
+    vu_carnet = {k: jamais for k in kinds}
+    prix_au_carnet = {}
+
+    def prochain():
+        maintenant = time.time()
+        best, score = None, -1
+        for k in kinds:
+            attente = maintenant - vu_carnet[k]
+            p = (instant.get(k) or {}).get("p")
+            bouge = (p is not None and prix_au_carnet.get(k) is not None
+                     and abs(p - prix_au_carnet[k]) > 1e-9)
+            s2 = attente * (3.0 if bouge else 1.0)
+            if s2 > score:
+                best, score = k, s2
+        return best
+
+    etat = {"dernier_live": time.time(), "dernier_ticker": time.time(),
+            "dernier_bilan": time.time()}
+    chrono_zero()
+    t_debut_cycle = time.time()
+    lus_ce_cycle = set()
 
     while time.time() - debut < DUREE:
-        tour += 1
-        t0 = time.time()
-        limite = debut + DUREE
-        AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour,
-                       refus_a=None, ok_le_plus_vite=None, silences=0)
-        chrono_zero()
-        refusees = lot(kinds, ordres, agg, volp, limite)
+        # --- le ticker a-t-il la priorite ? ---------------------------
+        if time.time() - etat["dernier_ticker"] >= TICKER_SEC:
+            etat["dernier_ticker"] = time.time()
+            tkn = fetch(TICKER, tries=1, cadence=True)
+            if tkn:
+                t0 = time.time()
+                traiter_ticker(tkn, pxh, instant, stamp())
+                CHRONO["traitement"] += time.time() - t0
+                AVANCEE["tickers"] += 1
+        else:
+            # --- sinon, le carnet le plus en retard --------------------
+            k = prochain()
+            ts = stamp()
+            book = fetch(BOOK % (REALM, k), tries=1, cadence=True)
+            if book:
+                t0 = time.time()
+                traiter(k, book, ordres, agg, volp, ts)
+                CHRONO["traitement"] += time.time() - t0
+                AVANCEE["lues"] += 1
+                vu_carnet[k] = time.time()
+                prix_au_carnet[k] = (instant.get(k) or {}).get("p")
+                lus_ce_cycle.add(k)
+            else:
+                # refuse : on le laisse en tete de file, il repassera tout
+                # de suite. Rien de special a faire, la priorite s'en charge.
+                pass
 
-        # On ne laisse pas tomber une ressource refusee : on y revient en fin
-        # de tour, apres avoir laisse le serveur souffler. Sans ca, un refus
-        # passager coute un tour entier d'observation sur ce produit — et tous
-        # ses mouvements se retrouvent attribues a l'heure suivante.
-        for essai in (1, 2):
-            if not refusees or time.time() > limite:
-                break
-            print(f"  reprise {essai} : {len(refusees)} ressource(s) refusee(s)"
-                  f" — {', '.join(map(str, refusees[:12]))}"
-                  + (" ..." if len(refusees) > 12 else ""))
-            time.sleep(min(10 * essai, 20))
-            refusees = lot(refusees, ordres, agg, volp, limite)
+        journal_avancee()
 
-        print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
-              f"{len(ordres)} ordres suivis, ration {RATION[0]} "
-              f"(essaye de {_vus[0]} a {_vus[1]}), "
-              f"{N429[0]} refus 429 au total"
-              + (f", {len(refusees)} inaccessible(s) : "
-                 + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
-        ecoule = time.time() - t0
-        print("  ou est passe le temps : " + chrono_texte(ecoule)
-              + f" · reste {max(0.0, ecoule - sum(CHRONO.values()))/60:.1f} min")
+        if time.time() - etat["dernier_live"] > LIVE_SEC:
+            etat["dernier_live"] = time.time()
+            t0 = time.time()
+            fermer_et_envoyer(ordres, agg, volp, pxh, instant)
+            CHRONO["envoi"] += time.time() - t0
 
-    fermer_et_envoyer(ordres, agg, volp, final=True)
-    print(f"{tour} tours effectues")
+        # --- un "cycle" = tous les carnets ont ete relus une fois ------
+        if len(lus_ce_cycle) >= len(kinds):
+            ecoule = time.time() - t_debut_cycle
+            print(f"cycle complet : {len(kinds)} carnets en {ecoule/60:.1f} min, "
+                  f"{AVANCEE['tickers']} releves de prix, {N429[0]} refus")
+            print("  " + chrono_texte(ecoule))
+            lus_ce_cycle = set()
+            t_debut_cycle = time.time()
+            chrono_zero()
+
+    fermer_et_envoyer(ordres, agg, volp, pxh, instant, final=True)
+    print(f"fin : {AVANCEE['lues']} carnets lus, {AVANCEE['tickers']} releves "
+          f"de prix, {N429[0]} refus")
 
 
-def fermer_et_envoyer(ordres, agg, volp, final=False):
-    """Les heures terminees partent dans l'historique ; l'heure en cours et
-    le carnet vont sur la branche live."""
-    en_cours = max((h for h, _, _ in agg), default=None)
-    finies = sorted({h for h, _, _ in agg if h != en_cours})
+def fermer_et_envoyer(ordres, agg, volp, pxh, instant, final=False):
+    """Les heures terminees partent dans l'historique ; l'heure en cours, le
+    carnet et les prix vont sur la branche live."""
+    heures = {h for h, _, _ in agg} | {h for h, _ in pxh}
+    en_cours = max(heures, default=None)
+    finies = sorted(heures - {en_cours}) if en_cours else []
 
     if finies:
         for h in finies:
@@ -825,6 +824,11 @@ def fermer_et_envoyer(ordres, agg, volp, final=False):
                 par_res.setdefault(l[1], []).append(l)
             for k, l in par_res.items():
                 ajouter_main(f"data/volume/{k}/{mois}.csv", EN_VOLUME, l, {h})
+            lp = lignes_prix(pxh, {h})
+            if lp:
+                ajouter_main(f"data/prix/{mois}.csv", EN_PRIX, lp, {h})
+        for cle in [c for c in pxh if c[0] in finies]:
+            del pxh[cle]
         for cle in [c for c in agg if c[0] in finies]:
             del agg[cle]
         for cle in [c for c in volp if c[0] in finies]:
@@ -836,9 +840,12 @@ def fermer_et_envoyer(ordres, agg, volp, final=False):
         "ordres.csv": en_csv(EN_ORDRES, lignes_ordres(ordres)),
         "heure_horaire.csv": en_csv(EN_HORAIRE, lignes_horaire(agg)),
         "heure_volume.csv": en_csv(EN_VOLUME, lignes_volume(volp)),
+        "heure_prix.csv": en_csv(EN_PRIX, lignes_prix(pxh)),
+        "prix.csv": en_csv(EN_INSTANT, lignes_instant(instant)),
     })
     if ok:
-        print(f"  carnet envoye ({len(ordres)} ordres)" +
+        print(f"  envoye : {len(instant)} prix a la minute, "
+              f"{len(ordres)} ordres" +
               (" — dernier envoi" if final else ""))
         journal_avancee(force=True)
 
