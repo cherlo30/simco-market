@@ -85,63 +85,54 @@ BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
 
 # ---------------------------------------------------------- le bon rythme
 #
-# On cherche en permanence l'ecart le plus court que le jeu accepte, et cet
-# ecart CHANGE au fil des heures. Trois idees :
+# Ce qu'on a MESURE sur le serveur du jeu, en le sondant depuis un navigateur :
 #
-# 1. BOUGER A CHAQUE ESSAI. Chaque requete qui passe fait descendre d'un cran
-#    minuscule, chaque refus fait remonter d'un cran plus franc. Pas de
-#    compteur, pas de palier a atteindre : le rythme respire en continu.
+#   - une reserve d'environ 10 requetes, qui se remplit quand on se tait
+#   - CHAQUE requete consomme un jeton, y compris celles qui sont refusees
+#   - un refus declenche une penalite de quelques secondes, et toute nouvelle
+#     tentative pendant cette penalite la RELANCE
 #
-# 2. APPRENDRE LA VALEUR DU REFUS. On retient la moyenne des rythmes auxquels
-#    on s'est fait refuser. Si les refus tombent tous vers 0,65 s, c'est que
-#    la limite est la. On s'interdit alors de redescendre sous 5 % au-dessus
-#    de cette valeur : on navigue juste au-dessus au lieu de replonger dedans.
+# Tenu a 0,55 s : 78 % de refus. Tenu a 2,50 s : encore 58 %. Autrement dit
+# ralentir ne repare presque rien. Mais apres six secondes de silence complet,
+# neuf requetes repassent d'un coup.
 #
-# 3. NE JAMAIS FIGER CETTE LIMITE. Elle s'efface doucement a chaque succes,
-#    donc le plancher redescend tout seul. Si le serveur se detend a 3 h du
-#    matin, on finira par retenter plus vite et on le decouvrira.
+# La conclusion est donc a l'oppose de ce qu'on croyait : ce qui compte n'est
+# pas de ralentir, c'est de SE TAIRE des qu'on se fait refuser. En simulation,
+# six secondes de silence font passer le debit de 1,9 a 88,8 ressources par
+# minute — quarante-sept fois mieux, avec le meme ecart entre requetes.
+#
+# Le rythme, lui, reste bas et bouge peu : il descend a chaque succes, monte
+# un peu a chaque refus, et c'est tout. Le silence fait le gros du travail.
 DELAI = [float(os.environ.get("DELAY", "0.8"))]
-DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.2"))
-TOUR_MAX = float(os.environ.get("TOUR_MAX_MIN", "6")) * 60
-PAS_BAS = float(os.environ.get("PAS_BAS", "0.01"))    # descente, a chaque succes
-PAS_HAUT = float(os.environ.get("PAS_HAUT", "0.15"))  # montee, a chaque refus
-MARGE = float(os.environ.get("MARGE", "1.05"))        # au-dessus du seuil appris
-OUBLI = float(os.environ.get("OUBLI", "0.9995"))      # effacement du seuil
-_plafond = [8.0]
+DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.5"))
+DELAI_MAX = float(os.environ.get("DELAI_MAX", "2.0"))
+PAS_BAS = float(os.environ.get("PAS_BAS", "0.005"))
+PAS_HAUT = float(os.environ.get("PAS_HAUT", "0.05"))
+SILENCE = float(os.environ.get("SILENCE", "7"))     # apres un refus, on se tait
 
 N429 = [0]
 AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0,
-           "refus_a": None, "ok_le_plus_vite": None, "ok_avant_refus": None,
+           "refus_a": None, "ok_le_plus_vite": None, "silences": 0,
            "journal": 0.0}
-_seuil = [None]        # la valeur de rythme ou les refus se produisent
 _vus = [DELAI[0], DELAI[0]]
-
-
-def plancher():
-    """On ne redescend pas dans la zone ou on sait qu'on se fait refuser."""
-    if _seuil[0] is None:
-        return DELAI_MIN
-    return max(DELAI_MIN, _seuil[0] * MARGE)
 
 
 def rythme_refus():
     N429[0] += 1
-    d = DELAI[0]
-    AVANCEE["ok_avant_refus"] = AVANCEE["ok_le_plus_vite"]
-    AVANCEE["refus_a"] = d
-    # la moyenne glissante des rythmes refuses : si les refus se ressemblent,
-    # elle converge vers la vraie limite du moment
-    _seuil[0] = d if _seuil[0] is None else _seuil[0] * 0.7 + d * 0.3
-    DELAI[0] = min(_plafond[0], max(d + PAS_HAUT, plancher()))
+    AVANCEE["refus_a"] = DELAI[0]
+    AVANCEE["silences"] += 1
+    DELAI[0] = min(DELAI_MAX, DELAI[0] + PAS_HAUT)
     _vus[1] = max(_vus[1], DELAI[0])
+    # LE point essentiel : on se tait, toutes voies confondues, le temps que
+    # la penalite retombe. Insister la prolongerait.
+    with _porte:
+        _silence[0] = max(_silence[0], time.time() + SILENCE)
 
 
 def rythme_succes():
     v = AVANCEE["ok_le_plus_vite"]
     AVANCEE["ok_le_plus_vite"] = DELAI[0] if v is None else min(v, DELAI[0])
-    if _seuil[0] is not None:
-        _seuil[0] *= OUBLI          # la limite apprise s'efface doucement
-    DELAI[0] = max(plancher(), DELAI[0] - PAS_BAS)
+    DELAI[0] = max(DELAI_MIN, DELAI[0] - PAS_BAS)
     _vus[0] = min(_vus[0], DELAI[0])
 
 
@@ -156,14 +147,12 @@ def journal_avancee(force=False):
     r = AVANCEE["refusees"]
     ok = AVANCEE["ok_le_plus_vite"]
     ra = AVANCEE["refus_a"]
-    av = AVANCEE["ok_avant_refus"]
     print(f"  tour {AVANCEE['tour']} : {AVANCEE['lues']}/{AVANCEE['total']} lues"
           f" · rythme {DELAI[0]:.2f} s"
-          + (f" · seuil appris {_seuil[0]:.2f} s, plancher {plancher():.2f} s"
-             if _seuil[0] is not None else "")
           + (f" · le plus rapide qui passe {ok:.2f} s" if ok is not None else "")
           + (f" · dernier refus a {ra:.2f} s" if ra is not None else "")
-          + (f" (ca passait a {av:.2f} s juste avant)" if av is not None else "")
+          + (f" · {AVANCEE['silences']} silence(s) de {SILENCE:.0f} s"
+             if AVANCEE["silences"] else "")
           + (f" · {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
              + (" ..." if len(r) > 10 else "") if r else " · aucun refus"))
 
@@ -177,6 +166,7 @@ VOIES = int(os.environ.get("VOIES", "3"))
 
 _porte = threading.Lock()
 _prochain = [0.0]
+_silence = [0.0]        # instant avant lequel personne ne parle
 
 
 def attendre_son_tour():
@@ -184,7 +174,8 @@ def attendre_son_tour():
     C'est ici, et nulle part ailleurs, que se decide le rythme."""
     with _porte:
         maintenant = time.time()
-        depart = max(maintenant, _prochain[0])
+        # on respecte l'ecart normal ET le silence impose par un refus recent
+        depart = max(maintenant, _prochain[0], _silence[0])
         _prochain[0] = depart + DELAI[0]
     if depart > maintenant:
         time.sleep(depart - maintenant)
@@ -192,7 +183,7 @@ def attendre_son_tour():
 
 # ---------------------------------------------------------------- reseau
 
-def fetch(url, tries=3, cadence=False):
+def fetch(url, tries=2, cadence=False):
     # Une meme ressource peut etre refusee ses 3 tentatives d'affilee. Si
     # chacune faisait monter le rythme, UNE ressource indisponible suffirait a
     # doubler le delai de toutes les autres. On ne compte donc que le premier
@@ -223,7 +214,9 @@ def fetch(url, tries=3, cadence=False):
                 # on n'insiste pas sur place : chaque seconde d'attente ici
                 # rallonge le tour pour TOUTES les ressources. La reprise de
                 # fin de tour reviendra sur celle-ci.
-                time.sleep(max(attente, 1.5 * (i + 1)))
+                if attente:
+                    with _porte:
+                        _silence[0] = max(_silence[0], time.time() + attente)
                 continue
             if i == tries - 1:
                 print(f"  ! {url.rsplit('/',3)[-3:]} : {e}")
@@ -655,11 +648,9 @@ def main():
     kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
     # le plafond du rythme se deduit du tour le plus long qu'on accepte :
     # au-dela, on ne voit plus assez de mouvements pour que ca serve.
-    _plafond[0] = max(DELAI_MIN, TOUR_MAX / max(len(kinds), 1))
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*DELAI[0]/60:.1f} min au rythme actuel "
-          f"(rythme plafonne a {_plafond[0]:.2f} s pour un tour de "
-          f"{TOUR_MAX/60:.0f} min au pire)")
+          f"~{len(kinds)*DELAI[0]/60:.1f} min a {DELAI[0]:.2f} s "
+          f"(silence de {SILENCE:.0f} s apres chaque refus)")
 
     tour = 0
     etat = {"dernier_live": 0.0}
@@ -697,7 +688,7 @@ def main():
         t0 = time.time()
         limite = debut + DUREE
         AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour,
-                       refus_a=None, ok_le_plus_vite=None, ok_avant_refus=None)
+                       refus_a=None, ok_le_plus_vite=None, silences=0)
         refusees = lot(kinds, ordres, agg, volp, limite)
 
         # On ne laisse pas tomber une ressource refusee : on y revient en fin
