@@ -1,0 +1,29 @@
+name: limite
+
+# Les deux points d'acces du marche ont-ils la meme limite ?
+#   LEGER  /api/v3/market/0/N/      : ce que le jeu utilise lui-meme
+#   LOURD  /api/v3/market/all/0/N/  : ce que notre collecteur utilise
+# A lancer COLLECTEUR ARRETE, sinon les deux se partagent le quota.
+
+on:
+  workflow_dispatch:
+    inputs:
+      repos:
+        description: "silence entre deux mesures (secondes)"
+        required: false
+        default: "90"
+
+concurrency:
+  group: simco
+  cancel-in-progress: false
+
+jobs:
+  comparer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: comparer les deux points d'acces
+        env:
+          REPOS: ${{ github.event.inputs.repos || '90' }}
+        run: python3 limite.py
