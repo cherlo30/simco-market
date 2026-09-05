@@ -7,7 +7,7 @@ Le programme ne se souvient de rien. Sa memoire, c'est le fichier.
 
 A chaque demarrage il lit le carnet vivant sur la branche `live`, ainsi que
 le CURSEUR qui dit ou le run precedent s'est arrete. Il lit alors LOT
-ressources (dix par defaut) en repartant juste apres le curseur, compare ce
+ressources (neuf par defaut) en repartant juste apres le curseur, compare ce
 qu'il voit a ce que le fichier disait, en deduit ce qui s'est vendu,
 reecrit le fichier et le curseur — puis il s'arrete.
 
@@ -15,7 +15,7 @@ UN RUN, UN CYCLE
 ----------------
 run   : une execution du programme. Il lit LOT carnets, enregistre, sort.
         Une ou deux minutes, pas six heures.
-cycle : le tour complet des 142 ressources, soit 15 runs enchaines a LOT=10.
+cycle : le tour complet des 142 ressources, soit 16 runs enchaines a LOT=9.
         Arrive au bout de la liste, le curseur revient au debut tout seul.
 
 Le programme ne sait pas qu'il fait partie d'une chaine, et n'a pas besoin
@@ -94,9 +94,25 @@ UA = "Mozilla/5.0 (compatible; simco-market-logger/3.0)"
 #
 # Un RUN ne fait plus tourner une boucle de six heures : il lit LOT carnets,
 # enregistre, et s'arrete. Le run suivant reprend la ou celui-ci s'est
-# arrete, grace au curseur ecrit sur la branche live. Quinze runs de dix
+# arrete, grace au curseur ecrit sur la branche live. Seize runs de neuf
 # produits font le tour des 142 : c'est un CYCLE.
-LOT = int(os.environ.get("LOT", "10"))                   # carnets par run
+#
+# POURQUOI NEUF ET PAS DIX
+# ------------------------
+# Le budget d'un run, c'est LOT carnets + 1 releve de prix. Tant que ce
+# total tient dans le QUOTA (10 requetes par 60 s), les requetes partent
+# TOUTES d'un coup : le run dure le temps du reseau, une quinzaine de
+# secondes. Des qu'on depasse d'une seule requete, la fenetre glissante
+# oblige a attendre qu'une place se libere — soit pres d'une minute pleine,
+# facturee par GitHub, pour une seule lecture de plus. Mesure sur un vrai
+# run a LOT=10 : 65 s dont 54 s d'attente pure, soit 87 % du temps a ne
+# rien faire.
+#
+# Le plancher est ailleurs, et il est physique : 142 carnets a 10 requetes
+# par minute font 14,2 min de cycle, qu'on les decoupe en 2 runs ou en 20.
+# On ne peut donc pas aller plus vite — seulement arreter de payer de
+# l'attente en plus du plancher.
+LOT = int(os.environ.get("LOT", "9"))                    # carnets par run
 CURSEUR = "curseur.txt"                                  # memoire du rang
 TEMOIN = "collecte_ok"                                   # preuve de fin propre
 
@@ -174,6 +190,17 @@ def attendre_son_tour():
             attente = _recentes[0] + FENETRE - maintenant + MARGE
         CHRONO["attente"] += attente
         time.sleep(max(0.05, attente))
+
+
+def slot_libre():
+    """Reste-t-il une place dans la fenetre, la tout de suite ? Sert a decider
+    si une requete facultative (le second releve de prix) est gratuite ou si
+    elle couterait une minute d'attente. Dans le doute, on s'en passe."""
+    with _porte:
+        maintenant = time.time()
+        while _recentes and _recentes[0] <= maintenant - FENETRE:
+            _recentes.pop(0)
+        return len(_recentes) < QUOTA[0]
 
 
 def rythme_refus():
@@ -773,12 +800,37 @@ def main():
     a_lire = sup + lot
     AVANCEE["total"] = len(a_lire)
 
+    # --- ou en est-on dans le cycle ? -------------------------------
+    # Le rang du premier produit du lot dit tout : combien de lots avant
+    # lui, combien apres. Le run n'a rien a memoriser de plus que le
+    # curseur pour pouvoir l'annoncer.
     runs_par_cycle = -(-len(kinds) // LOT) if LOT else 1
+    rang = kinds.index(lot[0]) if lot else 0
+    no_lot = rang // LOT + 1 if LOT else 1
+
+    # --- le budget du run --------------------------------------------
+    budget = len(a_lire) + 1                    # +1 pour le releve de prix
     print(f"{len(kinds)} produits au total · lot de {LOT} par run, "
           f"soit {runs_par_cycle} runs pour un cycle complet")
+    fin = kinds.index(lot[-1]) + 1 if lot else 0
+    # le lot peut chevaucher la fin de la liste : on le dit au lieu
+    # d'annoncer un "produit 144 sur 142" qui n'existe pas
+    situe = (f"produits {rang + 1} a {fin} sur {len(kinds)}" if fin >= rang + 1
+             else f"produits {rang + 1} a {len(kinds)} puis 1 a {fin} "
+                  f"(la boucle se referme ici)")
+    print(f"  lot {no_lot}/{runs_par_cycle} du cycle · {situe}")
     print(f"  ce run lit : {', '.join(map(str, lot))}"
           + (f"  (+ suivis : {', '.join(map(str, sup))})" if sup else ""))
-    print(f"  quota : {QUOTA[0]} requetes par {FENETRE:.0f} s")
+    if budget <= QUOTA[0]:
+        print(f"  budget : {budget} requetes pour un quota de {QUOTA[0]} par "
+              f"{FENETRE:.0f} s — aucune attente prevue")
+    else:
+        cout = (budget - QUOTA[0]) * FENETRE / QUOTA[0] + FENETRE
+        print(f"  ! budget : {budget} requetes pour un quota de {QUOTA[0]} par "
+              f"{FENETRE:.0f} s")
+        print(f"  ! ce run va donc ATTENDRE ~{cout:.0f} s, facturees pour rien."
+              f" Baisser LOT a {max(1, QUOTA[0] - 1 - len(sup))} supprime "
+              f"l'attente sans rien collecter de moins par minute.")
 
     for k in a_lire:
         if time.time() - debut > DUREE:
@@ -797,10 +849,10 @@ def main():
             # indisponible affamerait les 141 autres.
             print(f"  carnet {k} indisponible, passe au suivant")
 
-    # Un second releve de prix si le run a dure plus d'une minute : deux
-    # points valent mieux qu'un pour l'heure en cours, et ca ne coute qu'une
-    # requete sur les douze du run.
-    if time.time() - debut >= TICKER_SEC:
+    # Un second releve de prix, mais SEULEMENT s'il est gratuit : le run a
+    # dure plus d'une minute ET il reste une place dans la fenetre. Sinon on
+    # s'en passe — un point de prix de plus ne vaut pas une minute de runner.
+    if time.time() - debut >= TICKER_SEC and slot_libre():
         tkf = fetch(TICKER, tries=1, cadence=True)
         if tkf:
             traiter_ticker(tkf, pxh, instant, stamp())
@@ -815,10 +867,34 @@ def main():
     CHRONO["envoi"] += time.time() - t0
 
     ecoule = time.time() - debut
+    complet = AVANCEE["lues"] == len(a_lire)
+    verdict = ("lot complet" if complet
+               else f"lot INCOMPLET, {len(a_lire) - AVANCEE['lues']} carnet(s) "
+                    f"manque(nt) — ils repasseront au prochain cycle")
     print(f"fin de run en {ecoule:.0f} s : {AVANCEE['lues']}/{len(a_lire)} "
-          f"carnets lus, {AVANCEE['tickers']} releves de prix, "
-          f"{N429[0]} refus · curseur -> {nouveau}")
+          f"carnets lus ({verdict}), {AVANCEE['tickers']} releves de prix, "
+          f"{N429[0]} refus")
+    print(f"  lot {no_lot}/{runs_par_cycle} termine · curseur -> {nouveau} · "
+          f"le run suivant reprend au produit "
+          f"{lot_a_lire(kinds, nouveau)[0] if kinds else '?'}")
     print("  " + chrono_texte(ecoule))
+
+    # Le meme resume, mais sur la PAGE du run GitHub : lisible sans deplier
+    # les logs, et donc lisible d'un coup d'oeil sur la liste des runs.
+    resume = os.environ.get("GITHUB_STEP_SUMMARY")
+    if resume:
+        etat = "OK" if complet and not N429[0] else "a verifier"
+        with open(resume, "a") as fh:
+            fh.write(
+                f"### Lot {no_lot}/{runs_par_cycle} — {etat}\n\n"
+                f"| | |\n|---|---|\n"
+                f"| Produits de ce lot | {situe} |\n"
+                f"| Carnets lus | {AVANCEE['lues']}/{len(a_lire)} |\n"
+                f"| Releves de prix | {AVANCEE['tickers']} |\n"
+                f"| Refus du serveur | {N429[0]} |\n"
+                f"| Duree | {ecoule:.0f} s dont "
+                f"{CHRONO['attente']:.0f} s d'attente quota |\n"
+                f"| Curseur | apres le produit {nouveau} |\n\n")
 
     # Le temoin : sa presence dit au workflow que ce run est alle au bout.
     # Sans lui, pas de relance — c'est ce qui empeche une boucle de
