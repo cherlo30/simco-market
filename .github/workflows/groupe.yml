@@ -1,0 +1,20 @@
+name: groupe
+
+# Une minute, six requetes : une requete peut-elle ramener plusieurs produits ?
+# A lancer collecteur arrete, pour ne pas partager le quota.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: simco
+  cancel-in-progress: false
+
+jobs:
+  chercher:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: chercher un appel groupe
+        run: python3 groupe.py
