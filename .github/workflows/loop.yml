@@ -38,10 +38,13 @@ jobs:
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
-          DELAY: "0.8"        # point de depart ; le programme cherche ensuite
-          DELAI_MIN: "0.3"    # le plus rapide qu'on s'autorise
-          DELAI_MAX: "8.0"    # le plus lent avant d'abandonner
-          SONDE: "40"         # requetes sans refus avant de retenter plus vite
+          DELAY: "0.8"        # ecart de depart ; le programme cherche ensuite
+          DELAI_MIN: "0.2"    # le plus rapide qu'on s'autorise, quoi qu'il arrive
+          TOUR_MAX_MIN: "6"   # tour le plus long acceptable -> plafond du rythme
+          PAS_BAS: "0.01"     # on descend de ca a CHAQUE requete qui passe
+          PAS_HAUT: "0.15"    # on remonte de ca a CHAQUE refus
+          MARGE: "1.05"       # on navigue 5 % au-dessus du seuil appris
+          OUBLI: "0.9995"     # vitesse d'effacement du seuil appris
           VOIES: "3"          # requetes en vol simultanement
           LIVE_SEC: "300"
 
