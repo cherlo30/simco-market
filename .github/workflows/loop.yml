@@ -38,13 +38,14 @@ jobs:
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
-          DELAY: "0.8"        # ecart de depart ; le programme cherche ensuite
-          DELAI_MIN: "0.2"    # le plus rapide qu'on s'autorise, quoi qu'il arrive
-          TOUR_MAX_MIN: "6"   # tour le plus long acceptable -> plafond du rythme
-          PAS_BAS: "0.01"     # on descend de ca a CHAQUE requete qui passe
-          PAS_HAUT: "0.15"    # on remonte de ca a CHAQUE refus
-          MARGE: "1.05"       # on navigue 5 % au-dessus du seuil appris
-          OUBLI: "0.9995"     # vitesse d'effacement du seuil appris
+          DELAY: "0.8"        # ecart de depart entre deux requetes
+          DELAI_MIN: "0.5"    # le plus rapide qu'on s'autorise
+          DELAI_MAX: "2.0"    # le plus lent : au-dela ca ne sert plus a rien
+          SILENCE: "7"        # LE reglage qui compte : secondes de silence
+                              # complet apres un refus. Le jeu punit les
+                              # insistants ; se taire est ce qui repare.
+          PAS_BAS: "0.005"    # descente a chaque requete qui passe
+          PAS_HAUT: "0.05"    # montee a chaque refus
           VOIES: "3"          # requetes en vol simultanement
           LIVE_SEC: "300"
 
