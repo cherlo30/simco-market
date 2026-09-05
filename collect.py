@@ -67,7 +67,8 @@ chose : sur la citrouille, les baisses partielles totalisent quelques
 milliers d'unites par heure, les disparitions des centaines de milliers.
 Melangees, la deduction ecraserait la mesure.
 """
-import csv, functools, io, json, os, subprocess, sys, time
+import csv, functools, io, json, os, subprocess, sys, threading, time
+from concurrent.futures import ThreadPoolExecutor
 import urllib.request, urllib.error
 from datetime import datetime, timezone
 
@@ -78,36 +79,105 @@ TICKER = f"https://www.simcompanies.com/api/v3/market-ticker/{REALM}/"
 BOOK = "https://www.simcompanies.com/api/v3/market/all/%d/%d/"
 UA = "Mozilla/5.0 (compatible; simco-market-logger/3.0)"
 
-DELAY = float(os.environ.get("DELAY", "1.3"))            # entre deux requetes
 DUREE = int(os.environ.get("DUREE_MIN", "330")) * 60     # duree de vie
 LIVE_SEC = int(os.environ.get("LIVE_SEC", "300"))        # envoi du carnet
 BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
 
-FREIN = [0.0]     # ralentissement automatique quand le jeu refuse
+# ---------------------------------------------------------- le bon rythme
+#
+# On ne sait pas a quelle vitesse le jeu accepte d'etre interroge, et ca
+# CHANGE : parfois il tolere 0,3 s entre deux requetes, parfois il en exige
+# plusieurs. Alors on cherche, en permanence.
+#
+#   un refus isole  -> on ne bouge pas, on retente au meme rythme : le premier
+#                      refus est souvent passager, reagir tout de suite ferait
+#                      ralentir pour rien
+#   deux d'affilee  -> ca ne passe vraiment pas : on ralentit d'un coup sec
+#                      (x1,4) pour rattraper meme un changement brutal
+#   tout passe      -> apres SONDE requetes sans un seul refus, on retente un
+#                      peu plus vite (-0,05 s). Si c'etait trop, le refus nous
+#                      le dira et on remontera.
+#
+# Le rythme oscille donc autour de la vraie limite du moment au lieu de rester
+# bloque sur une valeur prudente. Et c'est lui qui fixe la duree du tour :
+# 143 ressources a 0,8 s font 2 minutes, a 4 s elles en font 10.
+DELAI = [float(os.environ.get("DELAY", "0.8"))]
+DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.3"))
+DELAI_MAX = float(os.environ.get("DELAI_MAX", "8.0"))
+SONDE = int(os.environ.get("SONDE", "40"))
+
 N429 = [0]
+_echecs = [0]
+_succes = [0]
+_vus = [DELAI[0], DELAI[0]]        # le plus bas et le plus haut atteints
+
+
+def rythme_refus():
+    N429[0] += 1
+    _echecs[0] += 1
+    _succes[0] = 0
+    if _echecs[0] >= 2:            # le premier refus ne compte pas
+        DELAI[0] = min(DELAI_MAX, DELAI[0] * 1.4 + 0.05)
+        _vus[1] = max(_vus[1], DELAI[0])
+        _echecs[0] = 0
+
+
+def rythme_succes():
+    _echecs[0] = 0
+    _succes[0] += 1
+    if _succes[0] >= SONDE:
+        DELAI[0] = max(DELAI_MIN, DELAI[0] - 0.05)
+        _vus[0] = min(_vus[0], DELAI[0])
+        _succes[0] = 0
+
+
+# Nombre de requetes en vol en meme temps.
+#
+# Ca n'accelere PAS le rythme d'appel : le verrou ci-dessous impose toujours
+# le meme ecart entre deux departs. Ca supprime seulement le temps mort — on
+# n'attend plus la reponse du jeu sans rien faire avant de repartir.
+VOIES = int(os.environ.get("VOIES", "3"))
+
+_porte = threading.Lock()
+_prochain = [0.0]
+
+
+def attendre_son_tour():
+    """Impose l'ecart entre deux departs, quel que soit le nombre de voies.
+    C'est ici, et nulle part ailleurs, que se decide le rythme."""
+    with _porte:
+        maintenant = time.time()
+        depart = max(maintenant, _prochain[0])
+        _prochain[0] = depart + DELAI[0]
+    if depart > maintenant:
+        time.sleep(depart - maintenant)
 
 
 # ---------------------------------------------------------------- reseau
 
-def fetch(url, tries=4):
+def fetch(url, tries=3, cadence=False):
     for i in range(tries):
+        if cadence:
+            attendre_son_tour()
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                        "Accept": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r:
                 d = json.loads(r.read().decode())
-            FREIN[0] = max(0.0, FREIN[0] - 0.02)
+            rythme_succes()
             return d
         except urllib.error.HTTPError as e:
             if e.code == 429:
-                N429[0] += 1
-                FREIN[0] = min(4.0, FREIN[0] + 0.3)
+                rythme_refus()
                 attente = 0.0
                 try:
                     attente = float(e.headers.get("Retry-After") or 0)
                 except Exception:
                     pass
-                time.sleep(max(attente, 3.0 * (i + 1)))
+                # on n'insiste pas sur place : chaque seconde d'attente ici
+                # rallonge le tour pour TOUTES les ressources. La reprise de
+                # fin de tour reviendra sur celle-ci.
+                time.sleep(max(attente, 1.5 * (i + 1)))
                 continue
             if i == tries - 1:
                 print(f"  ! {url.rsplit('/',3)[-3:]} : {e}")
@@ -153,7 +223,15 @@ EN_ORDRES = ["kind", "quality", "order_id", "seller_id", "price", "qty",
 #                      pouvoir le dire au lieu d'afficher un carnet perime.
 EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
               "cloture", "n_ordres", "qte_totale", "profondeur_5pct",
-              "vendu", "disparu", "repose", "retire"]
+              "vendu", "disparu", "repose", "retire", "pose"]
+# pose : quantite apparue pendant l'heure (offres neuves + quantite ajoutee a
+#        une offre existante). C'est elle qui permet de fermer l'equation :
+#
+#   stock(fin) = stock(debut) + pose - (vendu + disparu + repose + retire)
+#
+#        Si le compte ne tombe pas juste, la difference est du mouvement qu'on
+#        n'a PAS vu — une offre posee puis entamee entre deux passages. On ne
+#        peut pas l'observer, mais on peut desormais le CHIFFRER.
 EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "disparu", "n_evt"]
 
 
@@ -188,7 +266,7 @@ def lire_csv(texte, entete):
 
 
 # Comment deux enregistrements de la meme heure se combinent.
-SOMME = {"vendu", "disparu", "repose", "retire", "n_evt"}
+SOMME = {"vendu", "disparu", "repose", "retire", "pose", "n_evt"}
 PLUS_HAUT = {"haut"}
 PLUS_BAS = {"bas"}
 PREMIER = {"ouverture"}          # garde la valeur la plus ancienne
@@ -247,7 +325,7 @@ def charger_live():
             "n": int(r_[7] or 0), "qte": flt(r_[8]) or 0.0,
             "prof": flt(r_[9]), "vendu": flt(r_[10]) or 0.0,
             "disparu": flt(r_[11]) or 0.0, "repose": flt(r_[12]) or 0.0,
-            "retire": flt(r_[13]) or 0.0}
+            "retire": flt(r_[13]) or 0.0, "pose": flt(r_[14]) or 0.0}
 
     volp = {}
     for h, k, q, p, v, d, n in lire("heure_volume.csv", EN_VOLUME):
@@ -388,7 +466,7 @@ def traiter(kind, book, ordres, agg, volp, ts):
                                          "b": meilleur, "c": meilleur, "n": 0,
                                          "qte": 0.0, "prof": None, "vendu": 0.0,
                                          "disparu": 0.0, "repose": 0.0,
-                                         "retire": 0.0}
+                                         "retire": 0.0, "pose": 0.0}
             a["h"] = max(a["h"], meilleur)
             a["b"] = min(a["b"], meilleur)
             a["c"] = meilleur
@@ -451,6 +529,10 @@ def traiter(kind, book, ordres, agg, volp, ts):
             if delta > 0:
                 # un vendeur ne peut pas reduire son offre : c'est une vente
                 vendre(delta, av["p"], kind, q, h, agg, volp, certain=True)
+            elif delta < 0:
+                b = agg.get((h, kind, q))          # le vendeur a rajoute
+                if b is not None:
+                    b["pose"] += -delta
             av["passage"] = ts
             av["delta"] = -delta if delta else ""
             av["qt"] = qt
@@ -461,6 +543,9 @@ def traiter(kind, book, ordres, agg, volp, ts):
             oid = str(x["id"])
             if oid in ordres:
                 continue
+            b = agg.get((h, kind, q))
+            if b is not None:
+                b["pose"] += float(x["quantity"])
             ordres[oid] = {
                 "kind": kind, "q": q,
                 "sid": str((x.get("seller") or {}).get("id", "")),
@@ -489,7 +574,7 @@ def lignes_horaire(agg, heures=None):
         out.append([h, k, q, a["o"], a["h"], a["b"], a["c"], a["n"],
                     round(a["qte"]), round(a["prof"]) if a["prof"] is not None else "",
                     round(a["vendu"]), round(a["disparu"]), round(a["repose"]),
-                    round(a["retire"])])
+                    round(a["retire"]), round(a["pose"])])
     return out
 
 
@@ -522,55 +607,60 @@ def main():
     tk = fetch(TICKER, tries=3)
     kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*(DELAY+0.7)/60:.1f} min")
+          f"~{len(kinds)*DELAI[0]/60:.1f} min au rythme actuel")
 
     tour = 0
     etat = {"dernier_live": 0.0}
 
-    def passer(k, ordres, agg, volp):
-        """Interroge une ressource. Renvoie False si le jeu l'a refusee."""
-        book = fetch(BOOK % (REALM, k))
-        if book:
-            traiter(k, book, ordres, agg, volp, stamp())
-        time.sleep(DELAY + FREIN[0])
-        if time.time() - etat["dernier_live"] > LIVE_SEC:
-            etat["dernier_live"] = time.time()
-            fermer_et_envoyer(ordres, agg, volp)
-        return bool(book)
+    def lot(liste, ordres, agg, volp, limite):
+        """Interroge une serie de ressources, plusieurs requetes en vol, et
+        applique les resultats un par un dans l'ordre d'arrivee. Renvoie
+        celles que le jeu a refusees."""
+        refusees = []
+        with ThreadPoolExecutor(max_workers=VOIES) as pool:
+            taches = {}
+            for k in liste:
+                if time.time() > limite:
+                    refusees.append(k)
+                    continue
+                taches[pool.submit(
+                    lambda kk=k: (kk, fetch(BOOK % (REALM, kk), cadence=True),
+                                  stamp()))] = k
+            for t in taches:
+                k, book, ts = t.result()
+                if book:
+                    traiter(k, book, ordres, agg, volp, ts)
+                else:
+                    refusees.append(k)
+                if time.time() - etat["dernier_live"] > LIVE_SEC:
+                    etat["dernier_live"] = time.time()
+                    fermer_et_envoyer(ordres, agg, volp)
+        return refusees
 
     while time.time() - debut < DUREE:
         tour += 1
         t0 = time.time()
-        refusees = []
-        for k in kinds:
-            if time.time() - debut > DUREE:
-                break
-            if not passer(k, ordres, agg, volp):
-                refusees.append(k)
+        limite = debut + DUREE
+        refusees = lot(kinds, ordres, agg, volp, limite)
 
         # On ne laisse pas tomber une ressource refusee : on y revient en fin
         # de tour, apres avoir laisse le serveur souffler. Sans ca, un refus
-        # passager coute un tour entier d'observation sur ce produit — et
-        # tous ses mouvements se retrouvent attribues a l'heure suivante.
+        # passager coute un tour entier d'observation sur ce produit — et tous
+        # ses mouvements se retrouvent attribues a l'heure suivante.
         for essai in (1, 2):
-            if not refusees or time.time() - debut > DUREE:
+            if not refusees or time.time() > limite:
                 break
-            print(f"  reprise {essai} : {len(refusees)} ressource(s) refusee(s) "
-                  f"— {', '.join(map(str, refusees[:12]))}"
+            print(f"  reprise {essai} : {len(refusees)} ressource(s) refusee(s)"
+                  f" — {', '.join(map(str, refusees[:12]))}"
                   + (" ..." if len(refusees) > 12 else ""))
-            time.sleep(min(10 + 10 * essai, 30))
-            restantes = []
-            for k in refusees:
-                if time.time() - debut > DUREE:
-                    restantes.append(k)
-                elif not passer(k, ordres, agg, volp):
-                    restantes.append(k)
-            refusees = restantes
+            time.sleep(min(10 * essai, 20))
+            refusees = lot(refusees, ordres, agg, volp, limite)
 
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
-              f"{len(ordres)} ordres suivis, frein {FREIN[0]:.2f} s, "
+              f"{len(ordres)} ordres suivis, rythme {DELAI[0]:.2f} s "
+              f"(essaye de {_vus[0]:.2f} a {_vus[1]:.2f}), "
               f"{N429[0]} refus 429"
-              + (f", {len(refusees)} ressource(s) toujours inaccessible(s) : "
+              + (f", {len(refusees)} inaccessible(s) : "
                  + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
 
     fermer_et_envoyer(ordres, agg, volp, final=True)
