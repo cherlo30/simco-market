@@ -67,10 +67,10 @@ chose : sur la citrouille, les baisses partielles totalisent quelques
 milliers d'unites par heure, les disparitions des centaines de milliers.
 Melangees, la deduction ecraserait la mesure.
 """
-import csv, functools, io, json, os, subprocess, sys, threading, time
+import csv, functools, glob, io, json, os, subprocess, sys, threading, time
 from concurrent.futures import ThreadPoolExecutor
 import urllib.request, urllib.error
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 print = functools.partial(print, flush=True)
 
@@ -233,6 +233,7 @@ EN_HORAIRE = ["heure", "kind", "quality", "ouverture", "haut", "bas",
 #        n'a PAS vu — une offre posee puis entamee entre deux passages. On ne
 #        peut pas l'observer, mais on peut desormais le CHIFFRER.
 EN_VOLUME = ["heure", "kind", "quality", "prix", "vendu", "disparu", "n_evt"]
+
 
 
 def en_csv(entete, lignes):

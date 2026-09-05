@@ -339,7 +339,7 @@ async function demarrer() {
   const jour = t => t ? t.slice(8, 10) + "/" + t.slice(5, 7) : "";
   document.getElementById("sub").innerHTML =
     '<span class="pastille"></span>' + ent(ORDRES.length) + " offres en vente sur " +
-    kinds.length + " ressources · carnet mis a jour " + AGE +
+    kinds.length + " ressources · derniere ressource lue " + AGE +
     " · historique : " + heures.size + " heures de marche, du " +
     jour(bornes[0]) + " au " + jour(bornes[bornes.length - 1]);
   document.getElementById("foot").textContent =
@@ -543,8 +543,21 @@ function dessine() {
   tableau(pts);
 }
 
+// Depuis quand la ressource affichee n'a-t-elle pas ete relue ? Ce n'est PAS
+// la meme chose que la fraicheur du carnet entier : un tour de piste dure
+// plusieurs minutes, donc la ressource qu'on regarde peut avoir ete lue bien
+// avant la derniere. Afficher la fraicheur globale ferait passer un prix
+// perime pour un prix a l'instant.
+function vuLe(carnet) {
+  if (!carnet.length) return null;
+  return carnet.reduce((m, o) => o.passage > m ? o.passage : m, "");
+}
+
 function kpis(pts, carnet, qs) {
   const box = document.getElementById("kpis");
+  const vu = vuLe(carnet);
+  const retard = vu ? Date.now() - new Date(vu).getTime() : null;
+  const vieux = retard != null && retard > 8 * 60000;
   const avecPrix = pts.filter(p => p.c != null);
   const der = avecPrix[avecPrix.length - 1];
   // le meilleur prix, c'est le moins cher REELLEMENT en vente maintenant
@@ -565,7 +578,10 @@ function kpis(pts, carnet, qs) {
 
   box.innerHTML = [
     ["Meilleur prix", prix(base) + " $",
-      carnet.length ? "le moins cher en vente, " + AGE : "dernier releve (carnet vide)"],
+      !carnet.length ? "dernier releve horaire (carnet vide)"
+      : (vieux ? '<span class="err">lu il y a ' + duree(retard) +
+                 " — peut avoir change</span>"
+               : "le moins cher en vente, lu il y a " + duree(retard))],
     ["Variation 24 h", var24 == null ? "—" :
       '<span class="' + (var24 >= 0 ? "up" : "down") + '">' +
       (var24 >= 0 ? "+" : "") + fmt(var24, 2) + " %</span>",
@@ -985,19 +1001,17 @@ function tableCarnet(carnet) {
   const t = document.getElementById("t_carnet");
   // une offre non revue depuis longtemps signale une ressource que le jeu ne
   // nous laisse plus lire : mieux vaut le dire que d'afficher un carnet perime
-  const dernier = ORDRES.reduce((m, o) => o.passage > m ? o.passage : m, "");
-  const vu = carnet.length ? carnet.reduce((m, o) => o.passage > m ? o.passage : m, "") : "";
-  const retard = vu ? new Date(dernier).getTime() - new Date(vu).getTime() : 0;
-  document.getElementById("h_carnet").innerHTML = carnet.length
-    ? carnet.length + " offres en vente, relevees " +
-      duree(Date.now() - new Date(vu).getTime()) + " apres leur mise en ligne. " +
+  const vu = vuLe(carnet);
+  const retard = vu ? Date.now() - new Date(vu).getTime() : 0;
+  document.getElementById("h_carnet").innerHTML = !carnet.length
+    ? "Aucune offre en vente pour ce niveau de qualite."
+    : carnet.length + " offres, relevees <b>il y a " + duree(retard) + "</b>. " +
       "La colonne variation montre ce qui est parti depuis le passage precedent." +
-      (retard > 20 * 60000
-        ? ' <span class="err">Attention : cette ressource n\'a pas ete relue depuis ' +
-          duree(retard) + " — le jeu nous a peut-etre refuse l'acces. Ces prix " +
-          "peuvent etre perimes.</span>"
-        : "")
-    : "Aucune offre en vente pour ce niveau de qualite.";
+      (retard > 8 * 60000
+        ? ' <span class="err">Le tour de piste n\'est pas repasse sur cette ' +
+          "ressource depuis " + duree(retard) + " : des offres moins cheres ont " +
+          "pu apparaitre entre-temps. Verifie dans le jeu avant de te placer.</span>"
+        : "");
   const l = carnet.slice(0, 15);
   t.innerHTML = '<tr><th>Prix</th><th>Qualite</th><th>Quantite</th><th>Variation</th>' +
     '<th>Vendeur</th><th>En vente depuis</th></tr>' +
