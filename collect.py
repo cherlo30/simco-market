@@ -85,51 +85,87 @@ BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
 
 # ---------------------------------------------------------- le bon rythme
 #
-# On ne sait pas a quelle vitesse le jeu accepte d'etre interroge, et ca
-# CHANGE : parfois il tolere 0,3 s entre deux requetes, parfois il en exige
-# plusieurs. Alors on cherche, en permanence.
+# On cherche en permanence l'ecart le plus court que le jeu accepte, et cet
+# ecart CHANGE au fil des heures. Trois idees :
 #
-#   un refus isole  -> on ne bouge pas, on retente au meme rythme : le premier
-#                      refus est souvent passager, reagir tout de suite ferait
-#                      ralentir pour rien
-#   deux d'affilee  -> ca ne passe vraiment pas : on ralentit d'un coup sec
-#                      (x1,4) pour rattraper meme un changement brutal
-#   tout passe      -> apres SONDE requetes sans un seul refus, on retente un
-#                      peu plus vite (-0,05 s). Si c'etait trop, le refus nous
-#                      le dira et on remontera.
+# 1. BOUGER A CHAQUE ESSAI. Chaque requete qui passe fait descendre d'un cran
+#    minuscule, chaque refus fait remonter d'un cran plus franc. Pas de
+#    compteur, pas de palier a atteindre : le rythme respire en continu.
 #
-# Le rythme oscille donc autour de la vraie limite du moment au lieu de rester
-# bloque sur une valeur prudente. Et c'est lui qui fixe la duree du tour :
-# 143 ressources a 0,8 s font 2 minutes, a 4 s elles en font 10.
+# 2. APPRENDRE LA VALEUR DU REFUS. On retient la moyenne des rythmes auxquels
+#    on s'est fait refuser. Si les refus tombent tous vers 0,65 s, c'est que
+#    la limite est la. On s'interdit alors de redescendre sous 5 % au-dessus
+#    de cette valeur : on navigue juste au-dessus au lieu de replonger dedans.
+#
+# 3. NE JAMAIS FIGER CETTE LIMITE. Elle s'efface doucement a chaque succes,
+#    donc le plancher redescend tout seul. Si le serveur se detend a 3 h du
+#    matin, on finira par retenter plus vite et on le decouvrira.
 DELAI = [float(os.environ.get("DELAY", "0.8"))]
-DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.3"))
-DELAI_MAX = float(os.environ.get("DELAI_MAX", "8.0"))
-SONDE = int(os.environ.get("SONDE", "40"))
+DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.2"))
+TOUR_MAX = float(os.environ.get("TOUR_MAX_MIN", "6")) * 60
+PAS_BAS = float(os.environ.get("PAS_BAS", "0.01"))    # descente, a chaque succes
+PAS_HAUT = float(os.environ.get("PAS_HAUT", "0.15"))  # montee, a chaque refus
+MARGE = float(os.environ.get("MARGE", "1.05"))        # au-dessus du seuil appris
+OUBLI = float(os.environ.get("OUBLI", "0.9995"))      # effacement du seuil
+_plafond = [8.0]
 
 N429 = [0]
-AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0}
-_echecs = [0]
-_succes = [0]
-_vus = [DELAI[0], DELAI[0]]        # le plus bas et le plus haut atteints
+AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0,
+           "refus_a": None, "ok_le_plus_vite": None, "ok_avant_refus": None,
+           "journal": 0.0}
+_seuil = [None]        # la valeur de rythme ou les refus se produisent
+_vus = [DELAI[0], DELAI[0]]
+
+
+def plancher():
+    """On ne redescend pas dans la zone ou on sait qu'on se fait refuser."""
+    if _seuil[0] is None:
+        return DELAI_MIN
+    return max(DELAI_MIN, _seuil[0] * MARGE)
 
 
 def rythme_refus():
     N429[0] += 1
-    _echecs[0] += 1
-    _succes[0] = 0
-    if _echecs[0] >= 2:            # le premier refus ne compte pas
-        DELAI[0] = min(DELAI_MAX, DELAI[0] * 1.4 + 0.05)
-        _vus[1] = max(_vus[1], DELAI[0])
-        _echecs[0] = 0
+    d = DELAI[0]
+    AVANCEE["ok_avant_refus"] = AVANCEE["ok_le_plus_vite"]
+    AVANCEE["refus_a"] = d
+    # la moyenne glissante des rythmes refuses : si les refus se ressemblent,
+    # elle converge vers la vraie limite du moment
+    _seuil[0] = d if _seuil[0] is None else _seuil[0] * 0.7 + d * 0.3
+    DELAI[0] = min(_plafond[0], max(d + PAS_HAUT, plancher()))
+    _vus[1] = max(_vus[1], DELAI[0])
 
 
 def rythme_succes():
-    _echecs[0] = 0
-    _succes[0] += 1
-    if _succes[0] >= SONDE:
-        DELAI[0] = max(DELAI_MIN, DELAI[0] - 0.05)
-        _vus[0] = min(_vus[0], DELAI[0])
-        _succes[0] = 0
+    v = AVANCEE["ok_le_plus_vite"]
+    AVANCEE["ok_le_plus_vite"] = DELAI[0] if v is None else min(v, DELAI[0])
+    if _seuil[0] is not None:
+        _seuil[0] *= OUBLI          # la limite apprise s'efface doucement
+    DELAI[0] = max(plancher(), DELAI[0] - PAS_BAS)
+    _vus[0] = min(_vus[0], DELAI[0])
+
+
+def journal_avancee(force=False):
+    """Une ligne par minute : ou en est le tour, a quel rythme, ce qui passe,
+    ce qui refuse, et la limite qu'on a apprise."""
+    if not force and time.time() - AVANCEE["journal"] < 60:
+        return
+    AVANCEE["journal"] = time.time()
+    if not AVANCEE["total"]:
+        return
+    r = AVANCEE["refusees"]
+    ok = AVANCEE["ok_le_plus_vite"]
+    ra = AVANCEE["refus_a"]
+    av = AVANCEE["ok_avant_refus"]
+    print(f"  tour {AVANCEE['tour']} : {AVANCEE['lues']}/{AVANCEE['total']} lues"
+          f" · rythme {DELAI[0]:.2f} s"
+          + (f" · seuil appris {_seuil[0]:.2f} s, plancher {plancher():.2f} s"
+             if _seuil[0] is not None else "")
+          + (f" · le plus rapide qui passe {ok:.2f} s" if ok is not None else "")
+          + (f" · dernier refus a {ra:.2f} s" if ra is not None else "")
+          + (f" (ca passait a {av:.2f} s juste avant)" if av is not None else "")
+          + (f" · {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
+             + (" ..." if len(r) > 10 else "") if r else " · aucun refus"))
 
 
 # Nombre de requetes en vol en meme temps.
@@ -617,8 +653,13 @@ def main():
 
     tk = fetch(TICKER, tries=3)
     kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
+    # le plafond du rythme se deduit du tour le plus long qu'on accepte :
+    # au-dela, on ne voit plus assez de mouvements pour que ca serve.
+    _plafond[0] = max(DELAI_MIN, TOUR_MAX / max(len(kinds), 1))
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*DELAI[0]/60:.1f} min au rythme actuel")
+          f"~{len(kinds)*DELAI[0]/60:.1f} min au rythme actuel "
+          f"(rythme plafonne a {_plafond[0]:.2f} s pour un tour de "
+          f"{TOUR_MAX/60:.0f} min au pire)")
 
     tour = 0
     etat = {"dernier_live": 0.0}
@@ -645,6 +686,7 @@ def main():
                 else:
                     refusees.append(k)
                     AVANCEE["refusees"].append(k)
+                journal_avancee()
                 if time.time() - etat["dernier_live"] > LIVE_SEC:
                     etat["dernier_live"] = time.time()
                     fermer_et_envoyer(ordres, agg, volp)
@@ -654,7 +696,8 @@ def main():
         tour += 1
         t0 = time.time()
         limite = debut + DUREE
-        AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour)
+        AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour,
+                       refus_a=None, ok_le_plus_vite=None, ok_avant_refus=None)
         refusees = lot(kinds, ordres, agg, volp, limite)
 
         # On ne laisse pas tomber une ressource refusee : on y revient en fin
@@ -673,7 +716,7 @@ def main():
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
               f"{len(ordres)} ordres suivis, rythme {DELAI[0]:.2f} s "
               f"(essaye de {_vus[0]:.2f} a {_vus[1]:.2f}), "
-              f"{N429[0]} refus 429"
+              f"{N429[0]} refus 429 au total"
               + (f", {len(refusees)} inaccessible(s) : "
                  + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
 
@@ -710,15 +753,9 @@ def fermer_et_envoyer(ordres, agg, volp, final=False):
         "heure_volume.csv": en_csv(EN_VOLUME, lignes_volume(volp)),
     })
     if ok:
-        av = ""
-        if AVANCEE["total"]:
-            r = AVANCEE["refusees"]
-            av = (f" · tour {AVANCEE['tour']} : {AVANCEE['lues']}/"
-                  f"{AVANCEE['total']} ressources lues, rythme {DELAI[0]:.2f} s"
-                  + (f", {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
-                     + (" ..." if len(r) > 10 else "") if r else ", aucun refus"))
-        print(f"  carnet envoye ({len(ordres)} ordres){av}" +
+        print(f"  carnet envoye ({len(ordres)} ordres)" +
               (" — dernier envoi" if final else ""))
+        journal_avancee(force=True)
 
 
 if __name__ == "__main__":
