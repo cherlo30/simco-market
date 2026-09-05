@@ -1,40 +1,13 @@
 name: menage
 
-# Supprime d'un coup les fichiers qui ne servent plus, au lieu de les
-# effacer un par un dans l'interface GitHub.
-#
-# CE QUI RESTE :
-#   collect.py                      le collecteur
-#   index.html                      le tableau de bord
-#   .github/workflows/loop.yml      la boucle de collecte
-#   .github/workflows/menage.yml    ce fichier
-#   data/                           l'historique — on n'y touche JAMAIS
-#   .nojekyll, README.md            necessaires a GitHub Pages / au depot
-#
-# CE QUI PART : les sondes de diagnostic, une fois leur reponse obtenue,
-# et convertir.py qui a servi une seule fois a rattraper l'ancien format.
-#
-# Rien n'est perdu : tout reste dans l'historique git et se recupere avec
-#   git checkout <commit> -- <fichier>
+# Supprime les sondes qui ne servent plus. Rien d'autre.
+# data/ n'est jamais touche. Tout reste recuperable dans l'historique git.
 
 on:
   workflow_dispatch:
-    inputs:
-      garder_salves:
-        description: "garder salves.py (le test produit/compteur) ? oui/non"
-        required: false
-        default: "oui"
-      pour_de_vrai:
-        description: "taper OUI pour supprimer ; sinon simple apercu"
-        required: false
-        default: "apercu"
 
 permissions:
   contents: write
-
-concurrency:
-  group: simco
-  cancel-in-progress: false
 
 jobs:
   ranger:
@@ -42,64 +15,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: faire le tri
-        env:
-          GARDER_SALVES: ${{ github.event.inputs.garder_salves || 'oui' }}
-          POUR_DE_VRAI: ${{ github.event.inputs.pour_de_vrai || 'apercu' }}
+      - name: supprimer
         run: |
-          set -u
-          A_SUPPRIMER="
-          convertir.py
-          sonde.py
-          sonde2.py
-          groupe.py
-          limite.py
-          vieux.py
-          rollup.py
-          analyse.py
-          rejouer.py
-          .github/workflows/sonde.yml
-          .github/workflows/sonde2.yml
-          .github/workflows/groupe.yml
-          .github/workflows/limite.yml
-          "
-          if [ "$GARDER_SALVES" != "oui" ]; then
-            A_SUPPRIMER="$A_SUPPRIMER
-          salves.py
-          .github/workflows/salves.yml
-          "
-          fi
+          git config user.name "market-bot"
+          git config user.email "market-bot@users.noreply.github.com"
 
-          echo "=== ce qui va etre supprime ==="
-          TROUVES=""
-          for f in $A_SUPPRIMER; do
-            if git ls-files --error-unmatch "$f" >/dev/null 2>&1; then
-              echo "  - $f"
-              TROUVES="$TROUVES $f"
-            fi
-          done
-          [ -z "$TROUVES" ] && echo "  (rien a supprimer, le depot est deja propre)"
+          git rm -f --ignore-unmatch \
+            convertir.py \
+            groupe.py \
+            limite.py \
+            sonde.py \
+            sonde2.py \
+            vieux.py \
+            .github/workflows/groupe.yml \
+            .github/workflows/limite.yml \
+            .github/workflows/sonde.yml \
+            .github/workflows/sonde2.yml
 
-          echo
-          echo "=== ce qui reste ==="
-          git ls-files | grep -v '^data/' | sed 's/^/  /'
-          echo "  data/  ($(git ls-files data | wc -l) fichiers d'historique, intacts)"
+          echo "--- ce qui reste ---"
+          git ls-files | grep -v '^data/'
 
-          if [ "$POUR_DE_VRAI" != "OUI" ]; then
-            echo
-            echo "Apercu seulement. Pour supprimer vraiment, relance en tapant"
-            echo "OUI (en majuscules) dans le champ 'pour_de_vrai'."
+          if git diff --staged --quiet; then
+            echo "Rien a supprimer, le depot est deja propre."
             exit 0
           fi
 
-          [ -z "$TROUVES" ] && exit 0
-          git config user.name "market-bot"
-          git config user.email "market-bot@users.noreply.github.com"
-          git rm --quiet $TROUVES
-          git commit -q -m "menage : on ne garde que collect.py, index.html et loop.yml"
-          for i in 1 2 3 4 5; do
-            git pull --rebase --autostash origin "${GITHUB_REF_NAME}" \
-              && git push && echo "Depot range." && exit 0
-            sleep $((RANDOM % 10 + 5))
-          done
-          exit 1
+          git commit -m "menage : on garde collect.py, index.html et loop.yml"
+          git push
