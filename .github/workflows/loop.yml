@@ -38,7 +38,11 @@ jobs:
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
-          DELAY: "1.3"
+          DELAY: "0.8"        # point de depart ; le programme cherche ensuite
+          DELAI_MIN: "0.3"    # le plus rapide qu'on s'autorise
+          DELAI_MAX: "8.0"    # le plus lent avant d'abandonner
+          SONDE: "40"         # requetes sans refus avant de retenter plus vite
+          VOIES: "3"          # requetes en vol simultanement
           LIVE_SEC: "300"
 
       - name: filet de securite
