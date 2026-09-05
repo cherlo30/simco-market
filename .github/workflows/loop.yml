@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       lot:
-        description: "Nombre de carnets lus par run (10 par defaut, 1 pour tester)"
+        description: "Nombre de carnets lus par run (9 par defaut, 1 pour tester)"
         required: false
-        default: "10"
+        default: "9"
   schedule:
     - cron: "17 */3 * * *"      # filet de securite si la chaine se casse
 
@@ -39,10 +39,14 @@ jobs:
       - name: collecter
         run: python3 collect.py
         env:
-          # LE bouton. 10 = un cycle des 142 produits en 15 runs.
-          # Monter a 30 divise le nombre de runs par trois (donc l'overhead
-          # de demarrage du job), au prix d'un run de ~3-4 min.
-          LOT: ${{ github.event.inputs.lot || '10' }}
+          # LE bouton, et il a une bonne valeur : LOT + 1 releve de prix
+          # doit tenir dans QUOTA. A 9 le run n'attend jamais (~15 s) ;
+          # a 10 il attend 55 s pour une seule lecture de plus. Le cycle
+          # complet ne va pas plus vite pour autant — il est borne a
+          # 142/10 = 14,2 min par le serveur — mais il coute deux fois
+          # moins de minutes GitHub.
+          # Si des refus apparaissent, descendre a 8 avant tout le reste.
+          LOT: ${{ github.event.inputs.lot || '9' }}
           # MESURE sur le runner : le serveur accorde 10 lectures par
           # minute, pas une de plus. On ne cherche donc plus a ruser — on
           # vit dans la limite, ce qui rend les refus impossibles.
@@ -51,7 +55,8 @@ jobs:
           QUOTA_MIN: "5"      # plancher si le serveur se resserre
           MARGE: "0.3"        # coussin de securite, en secondes
           # market-ticker rend les 142 prix en UNE requete : un releve au
-          # debut du run, un a la fin s'il a dure plus d'une minute.
+          # debut du run, et un a la fin UNIQUEMENT s'il est gratuit
+          # (run long ET place libre dans la fenetre).
           TICKER_SEC: "60"
           # Plafond de securite : un run qui depasse ca s'arrete de lui-meme
           # et passe quand meme le temoin. Ce n'est pas la duree normale.
@@ -96,5 +101,5 @@ jobs:
           fi
           echo "Lot collecte en ${ecoule}s. Passage du temoin au lot suivant."
           gh workflow run loop.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
-             -f lot="${{ github.event.inputs.lot || '10' }}"
+             -f lot="${{ github.event.inputs.lot || '9' }}"
           echo "Temoin passe."
