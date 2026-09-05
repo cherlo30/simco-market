@@ -103,37 +103,61 @@ BRANCHE = os.environ.get("GITHUB_REF_NAME", "main")
 #
 # Le rythme, lui, reste bas et bouge peu : il descend a chaque succes, monte
 # un peu a chaque refus, et c'est tout. Le silence fait le gros du travail.
-DELAI = [float(os.environ.get("DELAY", "0.8"))]
-DELAI_MIN = float(os.environ.get("DELAI_MIN", "0.5"))
-DELAI_MAX = float(os.environ.get("DELAI_MAX", "2.0"))
-PAS_BAS = float(os.environ.get("PAS_BAS", "0.005"))
-PAS_HAUT = float(os.environ.get("PAS_HAUT", "0.05"))
-SILENCE = float(os.environ.get("SILENCE", "7"))     # apres un refus, on se tait
+# Le log de production a tranche : les refus tombent a la 11e requete, puis
+# a la 22e, puis a la 33e. Un intervalle EXACTEMENT regulier. Ca veut dire que
+# la reserve ne se remplit pas pendant qu'on parle : espacer les requetes ne
+# rapporte donc rien du tout, on paye l'attente sans rien recuperer.
+#
+#   reserve d'environ 10 requetes + remplissage seulement quand on se tait
+#
+# La bonne strategie n'est donc pas un rythme, c'est un RATIONNEMENT : on tire
+# ses 10 requetes le plus vite possible, puis on se tait le temps que la
+# reserve se refasse, et on recommence — sans jamais provoquer de refus.
+#
+#   142 ressources / 9 par salve = 16 salves x ~8 s = environ 2,2 min le tour,
+#   et zero refus, donc zero penalite qui s'auto-entretient.
+#
+# La ration s'ajuste toute seule : un refus la baisse d'un cran, et une longue
+# serie sans refus la remonte d'un cran pour retester la limite.
+RATION = [int(os.environ.get("RATION", "9"))]     # requetes par salve
+RATION_MIN = int(os.environ.get("RATION_MIN", "4"))
+RATION_MAX = int(os.environ.get("RATION_MAX", "14"))
+PAUSE = float(os.environ.get("PAUSE", "7.5"))     # silence entre deux salves
+PENALITE = float(os.environ.get("PENALITE", "12"))  # silence apres un refus
+ECART = float(os.environ.get("DELAY", "0.15"))    # a l'interieur d'une salve
+MONTEE = int(os.environ.get("MONTEE", "150"))     # succes d'affilee avant de
+                                                  # retenter une ration plus large
 
 N429 = [0]
 AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0,
            "refus_a": None, "ok_le_plus_vite": None, "silences": 0,
            "journal": 0.0}
-_vus = [DELAI[0], DELAI[0]]
+_suite = [0]            # succes d'affilee depuis le dernier refus
+_vus = [RATION[0], RATION[0]]   # ration la plus basse / la plus haute vue
 
 
 def rythme_refus():
+    """Un refus veut dire qu'on a mal compte : on rend un jeton, on se tait
+    plus longtemps que d'habitude, et on repart sur une salve neuve."""
     N429[0] += 1
-    AVANCEE["refus_a"] = DELAI[0]
+    AVANCEE["refus_a"] = RATION[0]
     AVANCEE["silences"] += 1
-    DELAI[0] = min(DELAI_MAX, DELAI[0] + PAS_HAUT)
-    _vus[1] = max(_vus[1], DELAI[0])
-    # LE point essentiel : on se tait, toutes voies confondues, le temps que
-    # la penalite retombe. Insister la prolongerait.
+    _suite[0] = 0
+    RATION[0] = max(RATION_MIN, RATION[0] - 1)
+    _vus[0] = min(_vus[0], RATION[0])
     with _porte:
-        _silence[0] = max(_silence[0], time.time() + SILENCE)
+        _tire[0] = 0
+        _prochain[0] = max(_prochain[0], time.time()) + PENALITE
 
 
 def rythme_succes():
+    _suite[0] += 1
+    if _suite[0] >= MONTEE and RATION[0] < RATION_MAX:
+        RATION[0] += 1
+        _vus[1] = max(_vus[1], RATION[0])
+        _suite[0] = 0
     v = AVANCEE["ok_le_plus_vite"]
-    AVANCEE["ok_le_plus_vite"] = DELAI[0] if v is None else min(v, DELAI[0])
-    DELAI[0] = max(DELAI_MIN, DELAI[0] - PAS_BAS)
-    _vus[0] = min(_vus[0], DELAI[0])
+    AVANCEE["ok_le_plus_vite"] = RATION[0] if v is None else max(v, RATION[0])
 
 
 def journal_avancee(force=False):
@@ -148,11 +172,10 @@ def journal_avancee(force=False):
     ok = AVANCEE["ok_le_plus_vite"]
     ra = AVANCEE["refus_a"]
     print(f"  tour {AVANCEE['tour']} : {AVANCEE['lues']}/{AVANCEE['total']} lues"
-          f" · rythme {DELAI[0]:.2f} s"
-          + (f" · le plus rapide qui passe {ok:.2f} s" if ok is not None else "")
-          + (f" · dernier refus a {ra:.2f} s" if ra is not None else "")
-          + (f" · {AVANCEE['silences']} silence(s) de {SILENCE:.0f} s"
-             if AVANCEE["silences"] else "")
+          f" · salves de {RATION[0]} requetes puis {PAUSE:.0f} s de silence"
+          + (f" · la plus large qui passe {ok}" if ok is not None else "")
+          + (f" · refus a {ra}" if ra is not None else "")
+          + (f" · {AVANCEE['silences']} refus" if AVANCEE["silences"] else "")
           + (f" · {len(r)} refusee(s) : " + ", ".join(map(str, r[:10]))
              + (" ..." if len(r) > 10 else "") if r else " · aucun refus"))
 
@@ -165,18 +188,22 @@ def journal_avancee(force=False):
 VOIES = int(os.environ.get("VOIES", "1"))
 
 _porte = threading.Lock()
-_prochain = [0.0]
-_silence = [0.0]        # instant avant lequel personne ne parle
+_prochain = [0.0]       # instant du prochain depart autorise
+_tire = [0]             # requetes deja tirees dans la salve en cours
 
 
 def attendre_son_tour():
-    """Impose l'ecart entre deux departs, quel que soit le nombre de voies.
-    C'est ici, et nulle part ailleurs, que se decide le rythme."""
+    """Distribue les requetes par salves : RATION d'affilee, puis PAUSE de
+    silence complet. C'est ici, et nulle part ailleurs, que se decide le
+    debit."""
     with _porte:
         maintenant = time.time()
-        # on respecte l'ecart normal ET le silence impose par un refus recent
-        depart = max(maintenant, _prochain[0], _silence[0])
-        _prochain[0] = depart + DELAI[0]
+        depart = max(maintenant, _prochain[0])
+        if _tire[0] >= RATION[0]:
+            depart += PAUSE        # la reserve se refait pendant ce silence
+            _tire[0] = 0
+        _tire[0] += 1
+        _prochain[0] = depart + ECART
     if depart > maintenant:
         time.sleep(depart - maintenant)
 
@@ -216,7 +243,7 @@ def fetch(url, tries=2, cadence=False):
                 # fin de tour reviendra sur celle-ci.
                 if attente:
                     with _porte:
-                        _silence[0] = max(_silence[0], time.time() + attente)
+                        _prochain[0] = max(_prochain[0], time.time() + attente)
                 continue
             if i == tries - 1:
                 print(f"  ! {url.rsplit('/',3)[-3:]} : {e}")
@@ -649,8 +676,9 @@ def main():
     # le plafond du rythme se deduit du tour le plus long qu'on accepte :
     # au-dela, on ne voit plus assez de mouvements pour que ca serve.
     print(f"{len(kinds)} ressources suivies, un tour toutes les "
-          f"~{len(kinds)*DELAI[0]/60:.1f} min a {DELAI[0]:.2f} s "
-          f"(silence de {SILENCE:.0f} s apres chaque refus)")
+          f"~{len(kinds)*(ECART+PAUSE/max(1,RATION[0]))/60:.1f} min "
+          f"(salves de {RATION[0]} requetes espacees de {ECART:.2f} s, "
+          f"puis {PAUSE:.0f} s de silence)")
 
     tour = 0
     etat = {"dernier_live": 0.0}
@@ -705,8 +733,8 @@ def main():
             refusees = lot(refusees, ordres, agg, volp, limite)
 
         print(f"tour {tour} — {(time.time()-t0)/60:.1f} min, "
-              f"{len(ordres)} ordres suivis, rythme {DELAI[0]:.2f} s "
-              f"(essaye de {_vus[0]:.2f} a {_vus[1]:.2f}), "
+              f"{len(ordres)} ordres suivis, ration {RATION[0]} "
+              f"(essaye de {_vus[0]} a {_vus[1]}), "
               f"{N429[0]} refus 429 au total"
               + (f", {len(refusees)} inaccessible(s) : "
                  + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
