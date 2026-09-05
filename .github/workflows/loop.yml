@@ -3,10 +3,10 @@ name: collecte
 on:
   workflow_dispatch:
     inputs:
-      duree:
-        description: "Duree de la collecte en minutes (3 pour tester la chaine)"
+      lot:
+        description: "Nombre de carnets lus par run (10 par defaut, 1 pour tester)"
         required: false
-        default: "330"
+        default: "10"
   schedule:
     - cron: "17 */3 * * *"      # filet de securite si la chaine se casse
 
@@ -20,7 +20,9 @@ concurrency:
 jobs:
   collecte:
     runs-on: ubuntu-latest
-    timeout-minutes: 350
+    # Un run lit LOT carnets a 10 requetes/minute : deux minutes suffisent.
+    # Le timeout n'est plus la duree voulue, c'est le disjoncteur.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -32,12 +34,15 @@ jobs:
           git config user.name  "market-bot"
           git config user.email "market-bot@users.noreply.github.com"
 
-      # collect.py enregistre lui-meme : le carnet sur la branche live a
-      # chaque envoi, les heures terminees sur la branche principale.
+      # collect.py enregistre lui-meme : le carnet ET le curseur sur la
+      # branche live, les heures terminees sur la branche principale.
       - name: collecter
         run: python3 collect.py
         env:
-          DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
+          # LE bouton. 10 = un cycle des 142 produits en 15 runs.
+          # Monter a 30 divise le nombre de runs par trois (donc l'overhead
+          # de demarrage du job), au prix d'un run de ~3-4 min.
+          LOT: ${{ github.event.inputs.lot || '10' }}
           # MESURE sur le runner : le serveur accorde 10 lectures par
           # minute, pas une de plus. On ne cherche donc plus a ruser — on
           # vit dans la limite, ce qui rend les refus impossibles.
@@ -45,11 +50,12 @@ jobs:
           FENETRE: "60"       # ...par tranche de X secondes
           QUOTA_MIN: "5"      # plancher si le serveur se resserre
           MARGE: "0.3"        # coussin de securite, en secondes
-          # market-ticker rend les 142 prix en UNE requete : un dixieme du
-          # budget tient donc TOUS les prix a jour a la minute, et les neuf
-          # autres vont aux carnets detailles (qualite, profondeur, volumes).
+          # market-ticker rend les 142 prix en UNE requete : un releve au
+          # debut du run, un a la fin s'il a dure plus d'une minute.
           TICKER_SEC: "60"
-          LIVE_SEC: "300"
+          # Plafond de securite : un run qui depasse ca s'arrete de lui-meme
+          # et passe quand meme le temoin. Ce n'est pas la duree normale.
+          DUREE_MIN: "10"
 
       - name: filet de securite
         if: always()
@@ -70,18 +76,25 @@ jobs:
         env:
           PAT_BRUT: ${{ secrets.PAT }}
         run: |
-          ecoule=$(( $(date +%s) - DEBUT ))
-          if [ "$ecoule" -lt 90 ]; then
-            echo "La collecte n'a tenu que ${ecoule}s : c'est un plantage, pas une"
-            echo "fin de course. On ne relance PAS, pour ne pas boucler a l'infini."
+          # Avant, on jugeait un run a sa DUREE : moins de 90 s = plantage.
+          # Avec des runs d'une minute, ce critere ne veut plus rien dire.
+          # collect.py ecrit maintenant un fichier temoin en toute derniere
+          # ligne : sa presence prouve que le run est alle au bout, quelle
+          # que soit sa duree. Son absence prouve qu'il est mort en route.
+          if [ ! -f collecte_ok ]; then
+            echo "Pas de temoin 'collecte_ok' : le run est mort avant la fin."
+            echo "On ne relance PAS, pour ne pas boucler a l'infini sur un"
+            echo "plantage. Le cron de secours reprendra la chaine."
             exit 1
           fi
+          ecoule=$(( $(date +%s) - DEBUT ))
           GH_TOKEN="$(printf %s "$PAT_BRUT" | tr -d '[:space:]')"
           export GH_TOKEN
           if [ -z "$GH_TOKEN" ]; then
             echo "Le secret PAT est vide ou absent : impossible de passer le temoin."
             exit 1
           fi
-          echo "Collecte terminee apres ${ecoule}s. Passage du temoin."
-          gh workflow run loop.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"
+          echo "Lot collecte en ${ecoule}s. Passage du temoin au lot suivant."
+          gh workflow run loop.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
+             -f lot="${{ github.event.inputs.lot || '10' }}"
           echo "Temoin passe."
