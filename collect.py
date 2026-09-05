@@ -162,7 +162,7 @@ def journal_avancee(force=False):
 # Ca n'accelere PAS le rythme d'appel : le verrou ci-dessous impose toujours
 # le meme ecart entre deux departs. Ca supprime seulement le temps mort — on
 # n'attend plus la reponse du jeu sans rien faire avant de repartir.
-VOIES = int(os.environ.get("VOIES", "3"))
+VOIES = int(os.environ.get("VOIES", "1"))
 
 _porte = threading.Lock()
 _prochain = [0.0]
