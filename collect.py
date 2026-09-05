@@ -129,6 +129,26 @@ MONTEE = int(os.environ.get("MONTEE", "150"))     # succes d'affilee avant de
                                                   # retenter une ration plus large
 
 N429 = [0]
+
+# Ou passent les minutes ? Sans cette mesure on ne fait que supposer. Chaque
+# seconde du tour tombe dans exactement une case, et le tour affiche le detail.
+CHRONO = {"attente": 0.0, "reseau": 0.0, "traitement": 0.0, "envoi": 0.0,
+          "penalite": 0.0}
+
+
+def chrono_zero():
+    for c in CHRONO:
+        CHRONO[c] = 0.0
+
+
+def chrono_texte(total):
+    part = lambda v: f"{v/60:.1f} min ({v/total*100:.0f} %)" if total > 0 else "—"
+    return (f"attente cadence {part(CHRONO['attente'])}"
+            f" · penalites {part(CHRONO['penalite'])}"
+            f" · reseau {part(CHRONO['reseau'])}"
+            f" · traitement {part(CHRONO['traitement'])}"
+            f" · envois {part(CHRONO['envoi'])}")
+
 AVANCEE = {"lues": 0, "refusees": [], "total": 0, "tour": 0,
            "refus_a": None, "ok_le_plus_vite": None, "silences": 0,
            "journal": 0.0}
@@ -148,6 +168,7 @@ def rythme_refus():
     with _porte:
         _tire[0] = 0
         _prochain[0] = max(_prochain[0], time.time()) + PENALITE
+        _punition[0] += PENALITE
 
 
 def rythme_succes():
@@ -190,6 +211,7 @@ VOIES = int(os.environ.get("VOIES", "1"))
 _porte = threading.Lock()
 _prochain = [0.0]       # instant du prochain depart autorise
 _tire = [0]             # requetes deja tirees dans la salve en cours
+_punition = [0.0]       # secondes d'attente imputables a un refus
 
 
 def attendre_son_tour():
@@ -199,13 +221,22 @@ def attendre_son_tour():
     with _porte:
         maintenant = time.time()
         depart = max(maintenant, _prochain[0])
+        punition = _punition[0]
+        _punition[0] = 0.0
         if _tire[0] >= RATION[0]:
             depart += PAUSE        # la reserve se refait pendant ce silence
             _tire[0] = 0
         _tire[0] += 1
         _prochain[0] = depart + ECART
     if depart > maintenant:
-        time.sleep(depart - maintenant)
+        dt = depart - maintenant
+        # on distingue l'attente normale de celle qu'un refus nous a coutee :
+        # c'est la seule facon de savoir si la cadence est trop lente ou si
+        # ce sont les refus qui mangent le tour
+        pun = min(dt, punition)
+        CHRONO["penalite"] += pun
+        CHRONO["attente"] += dt - pun
+        time.sleep(dt)
 
 
 # ---------------------------------------------------------------- reseau
@@ -222,8 +253,10 @@ def fetch(url, tries=2, cadence=False):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": UA,
                                                        "Accept": "application/json"})
+            t_res = time.time()
             with urllib.request.urlopen(req, timeout=30) as r:
                 d = json.loads(r.read().decode())
+            CHRONO["reseau"] += time.time() - t_res
             rythme_succes()
             return d
         except urllib.error.HTTPError as e:
@@ -506,6 +539,16 @@ def pousser_main(message):
 
 # ------------------------------------------------------------- traitement
 
+# ressource -> numeros d'ordres, tenu a jour en meme temps que le carnet
+PAR_KIND = {}
+
+
+def reindexer(ordres):
+    PAR_KIND.clear()
+    for oid, v in ordres.items():
+        PAR_KIND.setdefault(v["kind"], set()).add(oid)
+
+
 def traiter(kind, book, ordres, agg, volp, ts):
     """Compare le carnet recu a ce qu'on avait, et en tire les ventes."""
     h = heure_de(ts)
@@ -514,10 +557,16 @@ def traiter(kind, book, ordres, agg, volp, ts):
         par_q.setdefault(int(x.get("quality", 0)), []).append(x)
 
     neuf = {str(x["id"]): x for x in book}
+    # On ne balaie plus les 11 000 ordres du carnet entier a chaque ressource :
+    # un index par ressource est tenu a jour au fil de l'eau. Sur un tour, ca
+    # remplace 1,6 million de comparaisons par 142 lectures d'index.
     anciens_par_q = {}
-    for oid, v in ordres.items():
-        if v["kind"] == kind:
-            anciens_par_q.setdefault(v["q"], []).append(oid)
+    for oid in list(PAR_KIND.get(kind, ())):
+        v = ordres.get(oid)
+        if v is None:
+            PAR_KIND[kind].discard(oid)
+            continue
+        anciens_par_q.setdefault(v["q"], []).append(oid)
 
     for q in set(par_q) | set(anciens_par_q):
         offres = sorted(par_q.get(q, []), key=lambda x: x["price"])
@@ -557,10 +606,11 @@ def traiter(kind, book, ordres, agg, volp, ts):
         # une disparition suivie d'une apparition. Si le meme vendeur
         # reapparait au meme instant sur la meme qualite, c'est presque
         # surement ca — pas une vente.
-        connus = set(ordres)
+        # (avant : set(ordres) etait reconstruit ICI, donc pour CHAQUE qualite
+        # de CHAQUE ressource — quinze millions d'insertions par tour pour rien)
         neufs_par_vendeur = {}
         for x in offres:
-            if str(x["id"]) in connus:
+            if str(x["id"]) in ordres:
                 continue
             v = str((x.get("seller") or {}).get("id", ""))
             if v:
@@ -573,6 +623,7 @@ def traiter(kind, book, ordres, agg, volp, ts):
             if x is None:
                 # offre entierement disparue
                 ordres.pop(oid, None)
+                PAR_KIND.get(kind, set()).discard(oid)
                 if av["p"] <= front + 1e-9:
                     # elle etait dans le bloc balaye par un achat : vendue,
                     # meme si son vendeur a repose juste apres (il a ecoule
@@ -613,6 +664,7 @@ def traiter(kind, book, ordres, agg, volp, ts):
             b = agg.get((h, kind, q))
             if b is not None:
                 b["pose"] += float(x["quantity"])
+            PAR_KIND.setdefault(kind, set()).add(oid)
             ordres[oid] = {
                 "kind": kind, "q": q,
                 "sid": str((x.get("seller") or {}).get("id", "")),
@@ -670,6 +722,7 @@ def lignes_ordres(ordres):
 def main():
     debut = time.time()
     ordres, agg, volp = charger_live()
+    reindexer(ordres)
 
     tk = fetch(TICKER, tries=3)
     kinds = sorted({r["kind"] for r in tk}) if tk else list(range(1, 156))
@@ -694,13 +747,20 @@ def main():
                 if time.time() > limite:
                     refusees.append(k)
                     continue
+                # tries=1 : sur un refus on ne reessaie PAS sur place. La
+                # deuxieme tentative consommait un jeton de plus, se faisait
+                # refuser pareil, et coutait une penalite entiere a la
+                # ressource. La reprise de fin de tour s'en charge, une fois
+                # que le serveur a souffle.
                 taches[pool.submit(
-                    lambda kk=k: (kk, fetch(BOOK % (REALM, kk), cadence=True),
-                                  stamp()))] = k
+                    lambda kk=k: (kk, fetch(BOOK % (REALM, kk), tries=1,
+                                            cadence=True), stamp()))] = k
             for t in taches:
                 k, book, ts = t.result()
                 if book:
+                    t_tr = time.time()
                     traiter(k, book, ordres, agg, volp, ts)
+                    CHRONO["traitement"] += time.time() - t_tr
                     AVANCEE["lues"] += 1
                 else:
                     refusees.append(k)
@@ -708,7 +768,9 @@ def main():
                 journal_avancee()
                 if time.time() - etat["dernier_live"] > LIVE_SEC:
                     etat["dernier_live"] = time.time()
+                    t_en = time.time()
                     fermer_et_envoyer(ordres, agg, volp)
+                    CHRONO["envoi"] += time.time() - t_en
         return refusees
 
     while time.time() - debut < DUREE:
@@ -717,6 +779,7 @@ def main():
         limite = debut + DUREE
         AVANCEE.update(lues=0, refusees=[], total=len(kinds), tour=tour,
                        refus_a=None, ok_le_plus_vite=None, silences=0)
+        chrono_zero()
         refusees = lot(kinds, ordres, agg, volp, limite)
 
         # On ne laisse pas tomber une ressource refusee : on y revient en fin
@@ -738,6 +801,9 @@ def main():
               f"{N429[0]} refus 429 au total"
               + (f", {len(refusees)} inaccessible(s) : "
                  + ", ".join(map(str, refusees)) if refusees else ", toutes lues"))
+        ecoule = time.time() - t0
+        print("  ou est passe le temps : " + chrono_texte(ecoule)
+              + f" · reste {max(0.0, ecoule - sum(CHRONO.values()))/60:.1f} min")
 
     fermer_et_envoyer(ordres, agg, volp, final=True)
     print(f"{tour} tours effectues")
