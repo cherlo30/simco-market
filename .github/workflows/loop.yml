@@ -38,15 +38,15 @@ jobs:
         run: python3 collect.py
         env:
           DUREE_MIN: ${{ github.event.inputs.duree || '330' }}
-          DELAY: "0.8"        # ecart de depart entre deux requetes
+          DELAY: "1.0"        # ecart de depart entre deux requetes
           DELAI_MIN: "0.5"    # le plus rapide qu'on s'autorise
-          DELAI_MAX: "2.0"    # le plus lent : au-dela ca ne sert plus a rien
+          DELAI_MAX: "3.0"    # le plus lent : au-dela ca ne sert plus a rien
           SILENCE: "7"        # LE reglage qui compte : secondes de silence
                               # complet apres un refus. Le jeu punit les
                               # insistants ; se taire est ce qui repare.
           PAS_BAS: "0.005"    # descente a chaque requete qui passe
           PAS_HAUT: "0.05"    # montee a chaque refus
-          VOIES: "3"          # requetes en vol simultanement
+          VOIES: "1"          # requetes en vol simultanement
           LIVE_SEC: "300"
 
       - name: filet de securite
