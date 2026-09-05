@@ -1,2 +1,3 @@
-heure,kind,quality,prix,vendu,n_evt
-2026-09-04T17,148,4,38.5,17269,1
+heure,kind,quality,prix,vendu,disparu,n_evt
+2026-09-04T17,148,4,38.5,17269,,1
+2026-09-04T23,148,1,32.75,0,312,1
