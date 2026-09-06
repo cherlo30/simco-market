@@ -1,1226 +1,1097 @@
-<!doctype html>
-<html lang="fr">
-<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Marche Sim Companies</title>
 <style>
+/* ------------------------------------------------------------------ jetons
+   Palette validee : categorielle blue/orange/aqua, divergente blue<->red
+   avec gris neutre au milieu, statuts reserves. Le mode sombre est CHOISI
+   (chaque valeur re-etagee pour sa surface), jamais un inversement. */
 :root{
-  color-scheme: light;
-  --plane:#f9f9f7; --surface:#fcfcfb;
+  color-scheme:light;
+  --plan:#f9f9f7; --surface:#fcfcfb;
   --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
-  --grid:#e1e0d9; --axis:#c3c2b7; --ring:rgba(11,11,11,.10);
-  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100;
-  --s5:#e87ba4; --s6:#008300; --s7:#4a3aa7; --s8:#e34948;
-  --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
-  --band:rgba(42,120,214,.13);
+  --grille:#e1e0d9; --axe:#c3c2b7; --bord:rgba(11,11,11,.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+  --hausse:#2a78d6; --baisse:#e34948; --neutre:#f0efec;
+  --bon:#0ca30c; --attention:#fab219; --grave:#ec835a; --critique:#d03b3b;
+  --vert-texte:#006300;
+  --ombre:0 1px 2px rgba(11,11,11,.04),0 1px 8px rgba(11,11,11,.04);
 }
-@media (prefers-color-scheme: dark){
-  :root:not([data-theme="light"]){
-    color-scheme: dark;
-    --plane:#0d0d0d; --surface:#1a1a19;
-    --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
-    --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
-    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-    --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-    --good:#0ca30c; --bad:#d03b3b; --warn:#fab219;
-    --band:rgba(57,135,229,.16);
-  }
-}
+@media (prefers-color-scheme:dark){:root:where(:not([data-theme="light"])){
+  color-scheme:dark;
+  --plan:#0d0d0d; --surface:#1a1a19;
+  --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+  --grille:#2c2c2a; --axe:#383835; --bord:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --hausse:#3987e5; --baisse:#e66767; --neutre:#383835;
+  --vert-texte:#0ca30c;
+  --ombre:none;
+}}
 :root[data-theme="dark"]{
-  color-scheme: dark;
-  --plane:#0d0d0d; --surface:#1a1a19;
-  --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
-  --grid:#2c2c2a; --axis:#383835; --ring:rgba(255,255,255,.10);
-  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500;
-  --s5:#d55181; --s6:#008300; --s7:#9085e9; --s8:#e66767;
-  --band:rgba(57,135,229,.16);
+  color-scheme:dark;
+  --plan:#0d0d0d; --surface:#1a1a19;
+  --ink:#fff; --ink2:#c3c2b7; --muted:#898781;
+  --grille:#2c2c2a; --axe:#383835; --bord:rgba(255,255,255,.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+  --hausse:#3987e5; --baisse:#e66767; --neutre:#383835;
+  --vert-texte:#0ca30c; --ombre:none;
 }
 *{box-sizing:border-box}
-body{margin:0;background:var(--plane);color:var(--ink);
-  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;}
-.wrap{max-width:1100px;margin:0 auto;padding:24px 18px 64px}
-h1{font-size:20px;margin:0 0 2px;letter-spacing:-.01em}
-.sub{color:var(--ink2);font-size:13px;margin:0 0 20px}
-.bar{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:20px}
-label{display:block;font-size:11px;text-transform:uppercase;letter-spacing:.06em;
-  color:var(--muted);margin-bottom:4px}
-select,input{font:inherit;background:var(--surface);color:var(--ink);
-  border:1px solid var(--ring);border-radius:8px;padding:7px 9px;min-width:0}
-select{min-width:190px}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:22px}
-.kpi{background:var(--surface);border:1px solid var(--ring);border-radius:12px;padding:14px 15px}
-.kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.kpi .v{font-size:24px;margin-top:4px;letter-spacing:-.02em}
-.kpi .n{font-size:12px;color:var(--ink2);margin-top:2px}
-.up{color:var(--good)} .down{color:var(--bad)}
-.card{background:var(--surface);border:1px solid var(--ring);border-radius:12px;
-  padding:16px 16px 8px;margin-bottom:18px;position:relative}
-.card h2{font-size:14px;margin:0 0 2px;font-weight:600}
-.card p.h{font-size:12px;color:var(--ink2);margin:0 0 12px}
-svg{display:block;width:100%;height:auto;overflow:visible}
-.gl{stroke:var(--grid);stroke-width:1}
-.ax{stroke:var(--axis);stroke-width:1}
-.tk{fill:var(--muted);font-size:11px}
-.tk.r{text-anchor:end} .tk.m{text-anchor:middle}
-.lbl{fill:var(--ink);font-size:12px}
-.tip{position:absolute;pointer-events:none;opacity:0;transition:opacity .1s;
-  background:var(--surface);border:1px solid var(--ring);border-radius:8px;
-  padding:7px 10px;font-size:12px;box-shadow:0 4px 16px rgba(0,0,0,.14);
-  white-space:nowrap;z-index:5}
-.tip b{font-variant-numeric:tabular-nums}
-table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
-th{text-align:right;font-weight:500;color:var(--muted);font-size:11px;
-  text-transform:uppercase;letter-spacing:.06em;padding:6px 8px;border-bottom:1px solid var(--grid)}
-th:first-child,td:first-child{text-align:left}
-td{padding:6px 8px;border-bottom:1px solid var(--grid);text-align:right}
-tr:last-child td{border-bottom:0}
-.scroll{overflow-x:auto;margin:0 -16px;padding:0 16px}
-.note{font-size:12px;color:var(--ink2);margin:10px 0 12px;padding:10px 12px;
-  background:var(--plane);border-radius:8px;border:1px solid var(--ring)}
-.calc{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px}
-.err{color:var(--bad)}
-.dim{color:var(--muted)}
-footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
-</style><style>
-.frais{font-size:11px;color:var(--muted);margin-left:8px;white-space:nowrap}
-.pastille{display:inline-block;width:7px;height:7px;border-radius:50%;
-  background:var(--good);margin-right:5px;vertical-align:middle}
-.moi{color:var(--s2);font-weight:600}
-.qbox{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.qbox label{display:inline-flex;align-items:center;gap:5px;margin:0;
-  font-size:12px;text-transform:none;letter-spacing:0;color:var(--ink2);
-  background:var(--surface);border:1px solid var(--ring);border-radius:999px;
-  padding:5px 11px;cursor:pointer;user-select:none;line-height:1}
-.qbox label.on{border-color:var(--s1);color:var(--ink)}
-.qbox input{accent-color:var(--s1);margin:0;cursor:pointer}
-.leg{display:flex;flex-wrap:wrap;gap:14px;margin:2px 0 10px;font-size:12px;
-  color:var(--ink2)}
-.leg span{display:inline-flex;align-items:center;gap:6px}
-.leg i{width:14px;height:2px;border-radius:1px;display:inline-block}
-/* le bandeau de fraicheur : discret quand tout va bien, visible sinon */
-#frais{margin-top:-6px;font-size:12px;display:flex;align-items:center;gap:7px}
-#frais.vieux{color:var(--warn,#e0a030)}
-#frais.casse{color:var(--err,#e05252)}
-.pouls{width:7px;height:7px;border-radius:50%;background:#3fb950;flex:0 0 auto}
-#frais.charge .pouls{animation:bat .9s ease-in-out infinite}
-#frais.vieux .pouls{background:#e0a030}
-#frais.casse .pouls{background:#e05252}
+/* `hidden` doit gagner : une regle display: sur la classe l'emporterait
+   autrement sur la feuille du navigateur, et l'element resterait visible. */
+[hidden]{display:none!important}
+body{margin:0;background:var(--plan);color:var(--ink);
+  font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:1360px;margin:0 auto;padding:22px 20px 64px}
+
+/* ------------------------------------------------------------------ tete */
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+h1{font-size:19px;font-weight:600;margin:0;letter-spacing:-.01em}
+.fil{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--ink2)}
+.pouls{width:7px;height:7px;border-radius:50%;background:var(--bon);flex:0 0 auto}
+.fil.vieux{color:var(--attention)} .fil.vieux .pouls{background:var(--attention)}
+.fil.casse{color:var(--critique)} .fil.casse .pouls{background:var(--critique)}
+.fil.charge .pouls{animation:bat .9s ease-in-out infinite}
 @keyframes bat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(1.6)}}
+
+/* --------------------------------------------------------------- onglets */
+nav.vues{display:flex;gap:2px;margin:18px 0 16px;border-bottom:1px solid var(--bord)}
+nav.vues button{appearance:none;border:0;background:none;font:inherit;font-size:13px;
+  color:var(--ink2);padding:9px 14px;cursor:pointer;border-bottom:2px solid transparent;
+  margin-bottom:-1px;border-radius:6px 6px 0 0}
+nav.vues button:hover{background:var(--surface);color:var(--ink)}
+nav.vues button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--s1);font-weight:550}
+
+/* ------------------------------------------------- barre de filtres unique */
+.filtres{display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;
+  margin-bottom:18px}
+.champ{display:flex;flex-direction:column;gap:5px}
+.champ label{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.04em;font-weight:600}
+select,input,button.lien{font:inherit;font-size:13px;background:var(--surface);
+  color:var(--ink);border:1px solid var(--bord);border-radius:7px;padding:6px 9px}
+select{min-width:200px}
+input[type=number]{width:104px}
+.segm{display:flex;background:var(--surface);border:1px solid var(--bord);
+  border-radius:7px;overflow:hidden}
+.segm button{appearance:none;border:0;background:none;font:inherit;font-size:12.5px;
+  color:var(--ink2);padding:6px 11px;cursor:pointer}
+.segm button[aria-pressed="true"]{background:var(--s1);color:#fff}
+.puces{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.puce{display:inline-flex;align-items:center;gap:5px;font-size:12px;
+  border:1px solid var(--bord);border-radius:999px;padding:4px 10px;cursor:pointer;
+  background:var(--surface);color:var(--ink2);user-select:none;min-height:26px}
+.puce input{display:none}
+.puce.on{background:var(--s1);border-color:var(--s1);color:#fff;font-weight:550}
+
+/* ----------------------------------------------------------------- cartes */
+.grille{display:grid;gap:14px}
+.carte{background:var(--surface);border:1px solid var(--bord);border-radius:11px;
+  padding:16px 18px;box-shadow:var(--ombre)}
+.carte h2{font-size:14px;font-weight:600;margin:0 0 3px;letter-spacing:-.005em}
+.carte .aide{font-size:12px;color:var(--muted);margin:0 0 14px;max-width:78ch}
+.tuiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:12px}
+.tuile{background:var(--surface);border:1px solid var(--bord);border-radius:11px;
+  padding:13px 15px;box-shadow:var(--ombre)}
+.tuile .k{font-size:11px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.04em;font-weight:600}
+.tuile .v{font-size:24px;font-weight:600;margin:3px 0 1px;letter-spacing:-.02em}
+.tuile .n{font-size:11.5px;color:var(--ink2)}
+.up{color:var(--vert-texte)} .down{color:var(--baisse)}
+
+/* --------------------------------------------------------------- tableaux */
+.tbl{width:100%;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px;
+  font-variant-numeric:tabular-nums}
+th{text-align:right;font-weight:600;color:var(--muted);font-size:11px;
+  text-transform:uppercase;letter-spacing:.03em;padding:7px 9px;
+  border-bottom:1px solid var(--bord);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+th.tri{cursor:pointer;user-select:none} th.tri:hover{color:var(--ink)}
+th[aria-sort]{color:var(--ink)}
+td{padding:7px 9px;border-bottom:1px solid var(--grille);white-space:nowrap}
+tbody tr:hover{background:var(--plan)}
+tbody tr.cliquable{cursor:pointer}
+.dim{color:var(--muted)}
+
+/* ------------------------------------------------------------ graphiques */
+figure{margin:0}
+figcaption{font-size:11.5px;color:var(--muted);margin-top:7px}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.g-grille{stroke:var(--grille);stroke-width:1;shape-rendering:crispEdges}
+.g-axe{stroke:var(--axe);stroke-width:1;shape-rendering:crispEdges}
+.g-tick{fill:var(--muted);font-size:10.5px;font-variant-numeric:tabular-nums}
+.g-titre{fill:var(--ink2);font-size:11px;font-weight:600}
+/* En SVG une regle CSS bat l'attribut `fill` : sans classe dediee, un nom
+   ecrit avec fill="var(--ink)" mais classe .g-tick ressortait en gris. */
+.g-nom{fill:var(--ink);font-size:11.5px;font-weight:600}
+.legende{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink2);
+  margin:0 0 10px}
+.legende span{display:inline-flex;align-items:center;gap:6px}
+.legende i{width:11px;height:11px;border-radius:3px;display:inline-block}
+.bulle{position:fixed;pointer-events:none;background:var(--surface);
+  border:1px solid var(--bord);border-radius:8px;padding:8px 11px;font-size:12px;
+  box-shadow:0 4px 18px rgba(0,0,0,.13);opacity:0;transition:opacity .1s;
+  z-index:50;max-width:280px;line-height:1.45}
+.bulle b{font-weight:600}
+.vide{display:flex;align-items:center;justify-content:center;height:150px;
+  color:var(--muted);font-size:12.5px;border:1px dashed var(--bord);border-radius:9px}
+.note{font-size:12px;color:var(--ink2);background:var(--plan);
+  border:1px solid var(--bord);border-left:3px solid var(--s1);
+  border-radius:0 8px 8px 0;padding:9px 13px;margin:12px 0 0}
+.chargement{opacity:.45;transition:opacity .15s}
 </style>
-</head>
-<body>
 <div class="wrap">
-<h1>Marche Sim Companies</h1>
-<p class="sub" id="sub">Chargement...</p>
-<p class="sub" id="frais"><span class="pouls"></span> connexion...</p>
+<header>
+  <h1>Marche Sim Companies</h1>
+  <span class="fil" id="fil"><span class="pouls"></span>connexion...</span>
+</header>
+<p class="aide" id="sous" style="color:var(--ink2);font-size:12.5px;margin:2px 0 0"></p>
 
-<div class="bar">
-  <div><label for="res">Ressource</label><select id="res"></select></div>
-  <div><label for="jours">Periode</label>
-    <select id="jours">
-      <option value="0.25">6 heures</option>
-      <option value="0.5">12 heures</option>
-      <option value="1">24 heures</option>
-      <option value="3">3 jours</option>
-      <option value="7" selected>7 jours</option>
-      <option value="14">14 jours</option>
-      <option value="30">30 jours</option>
-      <option value="90">90 jours</option>
-      <option value="9999">Tout</option>
-    </select></div>
-  <div style="flex:1 1 280px"><label>Qualite</label>
-    <div class="qbox" id="qual"></div></div>
-</div>
+<nav class="vues" role="tablist">
+  <button role="tab" id="o_marche" aria-selected="true">Vue marche</button>
+  <button role="tab" id="o_produit" aria-selected="false">Analyse produit</button>
+</nav>
 
-<div class="kpis" id="kpis"></div>
-
-<div class="card">
-  <h2>Prix heure par heure</h2>
-  <p class="h" id="h_prix">Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le plus bas de l'heure.</p>
-  <div id="c_prix"></div><div class="tip" id="t_prix"></div>
-</div>
-
-<div class="card">
-  <h2>A quel prix vendre</h2>
-  <p class="h" id="h_dem">La courbe de demande : combien le marche absorbe par jour selon le prix ou tu te places.</p>
-  <div class="calc">
-    <div><label for="i_prod">Ta production (u/jour)</label><input id="i_prod" type="number" step="500" value="0" placeholder="0"></div>
-    <div><label for="i_frais">Frais de bourse (%)</label><input id="i_frais" type="number" step="0.1" value="4"></div>
-    <div><label for="i_tr">Transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"><div class="frais" id="tr_marche" style="margin:3px 0 0"></div></div>
-    <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
+<!-- une seule barre de filtres, au-dessus de tout ce qu'elle cadre -->
+<div class="filtres" id="filtres">
+  <div class="champ" id="c_res" hidden>
+    <label for="res">Ressource</label><select id="res"></select>
   </div>
-  <p class="note" id="n_mes" style="margin:2px 0 12px"></p>
-  <div class="note" id="n_dem"></div>
-  <h3 style="font-size:13px;margin:16px 0 2px;font-weight:600">Ce qui s'est echange, prix par prix</h3>
-  <p class="h" id="h_vol">Les ventes observees a chaque palier de prix.</p>
-  <div id="c_vol"></div><div class="tip" id="t_vol"></div>
-  <h3 style="font-size:13px;margin:18px 0 2px;font-weight:600">Ce que le marche absorbe, selon ton prix</h3>
-  <p class="h">Cumul depuis le haut : tout ce qui s'est vendu a ton prix ou plus cher.</p>
-  <div id="c_dem"></div><div class="tip" id="t_dem"></div>
-  <h3 style="font-size:13px;margin:18px 0 2px;font-weight:600">Ce que ca te rapporte par jour</h3>
-  <p class="h">Le volume absorbe multiplie par ce qu'il te reste apres frais et transport, en contrat.</p>
-  <div id="c_rev"></div><div class="tip" id="t_rev"></div>
-</div>
-
-
-<div class="card">
-  <h2>Profondeur du carnet a moins de 5 % du meilleur prix</h2>
-  <p class="h">Combien d'unites tu peux ecouler sans faire chuter le prix de plus de 5 %.</p>
-  <div id="c_prof"></div><div class="tip" id="t_prof"></div>
-</div>
-
-<div class="card">
-  <h2>A quelle heure vendre</h2>
-  <p class="h" id="h_heure">Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC).</p>
-  <div id="c_heure"></div>
-</div>
-
-<div class="card">
-  <h2>Prix selon le nombre d'etoiles</h2>
-  <p class="h">Meilleur prix en vente a l'instant, pour chaque niveau de qualite.</p>
-  <div id="c_qual"></div>
-</div>
-
-<div class="card">
-  <h2>Le carnet en direct</h2>
-  <p class="h" id="h_carnet">Les offres en vente, de la moins chere a la plus chere.</p>
-  <div class="scroll"><table id="t_carnet"></table></div>
-</div>
-
-<div class="card">
-  <h2>Ce que la vente te rapporte vraiment</h2>
-  <p class="h">Frais de bourse et transport deduits, avec les reglages saisis plus haut.</p>
-  <div class="calc">
-    <div><label for="i_qte">Quantite a vendre</label><input id="i_qte" type="number" step="100" value="25000"></div>
+  <div class="champ">
+    <label for="per">Periode</label>
+    <div class="segm" id="per">
+      <button data-h="6">6 h</button><button data-h="24">24 h</button>
+      <button data-h="48">2 j</button><button data-h="0">tout</button>
+    </div>
   </div>
-  <div class="scroll"><table id="t_net"></table></div>
-  <div class="note" id="n_net"></div>
+  <div class="champ" id="c_qual" hidden>
+    <label>Qualites</label><div class="puces" id="qual"></div>
+  </div>
+  <div class="champ" id="c_frais" hidden>
+    <label for="i_frais">Frais de vente (%)</label>
+    <input id="i_frais" type="number" step="0.5" value="3">
+  </div>
+  <div class="champ" id="c_tr" hidden>
+    <label for="i_tr">Transport ($/u)</label>
+    <input id="i_tr" type="number" step="0.001" value="0.362">
+  </div>
 </div>
 
-<div class="card">
-  <h2>Les 24 dernieres heures en detail</h2>
-  <div class="scroll"><table id="t_tab"></table></div>
-</div>
+<!-- ================================================== VUE MARCHE ======= -->
+<section id="v_marche">
+  <div class="tuiles" id="t_marche" style="margin-bottom:14px"></div>
 
-<footer id="foot"></footer>
+  <div class="carte" style="margin-bottom:14px">
+    <h2>Carte du marche</h2>
+    <p class="aide">Chaque rectangle est une ressource : sa <b>surface</b> est la
+      valeur echangee sur la periode, sa <b>couleur</b> la variation de prix.
+      C'est la reponse a « ou est l'argent, et dans quel sens ca va ».</p>
+    <div class="legende" id="l_carte"></div>
+    <figure><div id="c_carte"></div>
+      <figcaption>Cliquer une ressource ouvre son analyse.</figcaption></figure>
+  </div>
+
+  <div class="carte">
+    <h2>Les 142 ressources</h2>
+    <p class="aide">Le meme contenu que la carte, en chiffres exacts et triable —
+      c'est la vue de reference quand la couleur ne suffit pas.</p>
+    <div class="tbl"><table id="t_142"></table></div>
+  </div>
+</section>
+
+<!-- ================================================= VUE PRODUIT ======= -->
+<section id="v_produit" hidden>
+  <div class="tuiles" id="t_produit" style="margin-bottom:14px"></div>
+
+  <div class="carte" style="margin-bottom:14px">
+    <h2>Prix, volume et profil</h2>
+    <p class="aide">Une bougie par heure : ouverture, plus haut, plus bas,
+      cloture du <b>meilleur prix du marche</b> (toutes qualites, ~115 releves
+      par heure). Dessous, le volume echange heure par heure. A droite, le meme
+      volume redistribue <b>par prix</b> et non par temps : les paliers longs
+      sont les prix ou le marche absorbe reellement.</p>
+    <div class="legende" id="l_bougies"></div>
+    <figure><div id="c_bougies"></div>
+      <figcaption id="f_bougies"></figcaption></figure>
+  </div>
+
+  <div class="grille" style="grid-template-columns:repeat(auto-fit,minmax(390px,1fr));margin-bottom:14px">
+    <div class="carte">
+      <h2>Le carnet, maintenant</h2>
+      <p class="aide">Quantite cumulee disponible en partant du prix le plus bas.
+        La pente dit combien il faut payer pour acheter en volume.</p>
+      <figure><div id="c_carnet"></div><figcaption id="f_carnet"></figcaption></figure>
+    </div>
+    <div class="carte">
+      <h2>Ce que le marche absorbe par jour</h2>
+      <p class="aide">Si tu te places a ce prix, voila ce qui part par jour —
+        cumul de tout ce qui s'est vendu a ce prix ou plus cher.</p>
+      <figure><div id="c_absorb"></div><figcaption id="f_absorb"></figcaption></figure>
+    </div>
+  </div>
+
+  <div class="carte" id="carte_marge" style="margin-bottom:14px" hidden>
+    <h2>Cout de fabrication et marge</h2>
+    <p class="aide" id="a_marge"></p>
+    <div class="tbl"><table id="t_marge"></table></div>
+  </div>
+
+  <div class="carte">
+    <h2>Heure par heure</h2>
+    <p class="aide">Le detail chiffre de chaque bougie. « Vendu » additionne la
+      mesure et la deduction ; le detail est au survol.</p>
+    <div class="tbl"><table id="t_heures"></table></div>
+  </div>
+</section>
 </div>
+<div class="bulle" id="bulle"></div>
 <script>
 const NOMS = {"1": "Electricite", "2": "Eau", "3": "Pommes", "4": "Oranges", "5": "Raisin", "6": "Cereales", "7": "Steak", "8": "Saucisses", "9": "Oeufs", "10": "Petrole brut", "11": "Essence", "12": "Diesel", "13": "Transport", "14": "Mineraux", "15": "Bauxite", "16": "Silicium", "17": "Produits chimiques", "18": "Aluminium", "19": "Plastique", "20": "Processeurs", "21": "Composants electroniques", "22": "Batteries", "23": "Ecrans", "24": "Smartphones", "25": "Tablettes", "26": "Ordinateurs portables", "27": "Moniteurs", "28": "Televiseurs", "29": "Recherche vegetale", "30": "Recherche energie", "31": "Recherche miniere", "32": "Recherche electronique", "33": "Recherche elevage", "34": "Recherche chimique", "35": "Logiciel", "40": "Coton", "41": "Tissu", "42": "Minerai de fer", "43": "Acier", "44": "Sable", "45": "Verre", "46": "Cuir", "47": "Ordinateur de bord", "48": "Moteur electrique", "49": "Interieur de luxe", "50": "Interieur de voiture", "51": "Carrosserie", "52": "Moteur thermique", "53": "Voiture electrique economique", "54": "Voiture electrique de luxe", "55": "Voiture economique", "56": "Voiture de luxe", "57": "Camion", "58": "Recherche automobile", "59": "Recherche mode", "60": "Sous-vetements", "61": "Gants", "62": "Robe", "63": "Chaussures Simmi", "64": "Sacs a main", "65": "Baskets", "66": "Semences", "67": "Papillotes de Noel", "68": "Minerai d'or", "69": "Lingots d'or", "70": "Montre en or", "71": "Collier", "72": "Canne a sucre", "73": "Ethanol", "74": "Methane", "75": "Fibre de carbone", "76": "Composite carbone", "77": "Fuselage", "78": "Aile", "79": "Composants haut de gamme", "80": "Calculateur de vol", "81": "Cockpit", "82": "Controle d'attitude", "83": "Carburant de fusee", "84": "Reservoir", "85": "Fusee a propergol solide", "86": "Moteur de fusee", "87": "Bouclier thermique", "88": "Propulseur ionique", "89": "Reacteur", "98": "Quadricoptere", "100": "Recherche aerospatiale", "101": "Beton arme", "102": "Briques", "103": "Ciment", "104": "Argile", "105": "Calcaire", "106": "Bois", "107": "Poutres d'acier", "108": "Planches", "109": "Fenetres", "110": "Outils", "111": "Unites de construction", "112": "Bulldozer", "113": "Recherche materiaux", "114": "Robots", "115": "Vache", "116": "Cochon", "117": "Lait", "118": "Grains de cafe", "119": "Cafe moulu", "120": "Legumes", "121": "Pain", "122": "Fromage", "123": "Tarte aux pommes", "124": "Jus d'orange", "125": "Cidre", "126": "Biere de gingembre", "127": "Pizza", "128": "Pates", "129": "Hamburger", "130": "Lasagnes", "131": "Boulettes", "132": "Cocktails", "133": "Farine", "134": "Beurre", "135": "Sucre", "136": "Feves de cacao", "137": "Pate", "138": "Sauciere", "139": "Fourrage", "140": "Chocolat", "141": "Huile vegetale", "142": "Salade", "143": "Samosas", "144": "Boule de Noel", "145": "Recettes", "146": "Citrouille", "147": "Citrouille sculptee", "148": "Costume de sorciere", "149": "Soupe de citrouille", "150": "Sapin", "151": "Lapin de Paques", "152": "Douceurs du Ramadan", "153": "Glace chocolat", "154": "Glace pomme", "155": "Oeuf en creme"};
+
+/* =================================================== couche de donnees ====
+   Rappel de la contrainte : raw.githubusercontent sert une BRANCHE avec cinq
+   minutes de retard et ignore le parametre anti-cache. Une URL portant le SHA
+   d'un commit, elle, est immuable : le cache ne peut pas se tromper. On
+   demande donc le SHA a l'API (60 appels/heure sans jeton) et on lit les
+   fichiers a cette adresse-la.                                            */
 const DEPOT = "https://raw.githubusercontent.com/cherlo30/simco-market/";
-const HIST = DEPOT + "main/";        // l'historique, une ecriture par heure
-
-// MESURE : raw.githubusercontent sert une BRANCHE avec ~5 min de retard, et
-// le parametre "?t=" n'y change rien — le CDN ignore la query string. On a
-// vu l'ancien chemin annoncer le run 65 quand le run 83 etait deja pousse.
-// En revanche une URL portant le SHA d'un commit est IMMUABLE : le cache ne
-// peut pas se tromper, il n'y a qu'une seule reponse possible. On demande
-// donc le SHA courant a l'API (60 appels/heure sans jeton, d'ou une
-// verification par minute), et on lit les fichiers a cette adresse-la.
+const HIST  = DEPOT + "refs/heads/main/";
 const API_REF = "https://api.github.com/repos/cherlo30/simco-market/commits/live";
-let SHA = null;               // commit courant de la branche live
-let QUOTA = null;             // appels API restants pour cette heure
-// tant qu'on n'a pas de SHA, on retombe sur la branche : perime, mais lisible
-const L = f => DEPOT + (SHA ? SHA : "refs/heads/live") + "/" + f;
+let SHA = null, QUOTA = null;
+const L = f => DEPOT + (SHA || "refs/heads/live") + "/" + f;
 
-const nom = k => NOMS[k] || ("ressource " + k);
-const fmt = (v, d) => v == null || !isFinite(v) ? "—" :
-  v.toLocaleString("fr-FR", {minimumFractionDigits: d, maximumFractionDigits: d});
-const prix = v => v == null || !isFinite(v) ? "—" : v === 0 ? "0" :
-  v.toLocaleString("fr-FR", Math.abs(v) < 1
-    ? {minimumFractionDigits: 4, maximumFractionDigits: 4}
-    : {minimumFractionDigits: 2, maximumFractionDigits: 2});
-const ent = v => v == null || !isFinite(v) ? "—" : Math.round(v).toLocaleString("fr-FR");
-
-// une duree en clair : 3 j 5 h · 2 h 14 min · 8 min · a l'instant
-function duree(ms) {
-  if (ms == null || !isFinite(ms) || ms < 0) return "—";
-  const min = Math.floor(ms / 60000);
-  if (min < 1) return "a l'instant";
-  if (min < 60) return min + " min";
-  const h = Math.floor(min / 60), r = min % 60;
-  if (h < 24) return h + " h" + (r ? " " + r + " min" : "");
-  const j = Math.floor(h / 24), rh = h % 24;
-  return j + " j" + (rh ? " " + rh + " h" : "");
-}
-
-/* ---------- lecture ------------------------------------------------ */
-
-async function charge(url, relatif) {
-  // Une URL qui porte un SHA de commit designe un contenu qui ne changera
-  // JAMAIS : on la laisse telle quelle, pour que le cache fasse son travail
-  // au lieu de retelecharger 836 Ko. Le jeton anti-cache ne sert que sur les
-  // URL de branche, ou le contenu bouge sous nos pieds.
+async function charge(url){
   const immuable = /\/[0-9a-f]{40}\//.test(url);
-  const cb = immuable ? "" : "?t=" + Math.floor(Date.now() / 5000);
-  for (const u of (relatif ? [relatif + cb, url + cb] : [url + cb])) {
-    try {
-      const r = await fetch(u, {cache: "no-store"});
-      if (r.ok) return await r.text();
-    } catch (e) { /* source suivante */ }
-  }
-  return null;
+  try{
+    const r = await fetch(url + (immuable ? "" : "?t=" + Math.floor(Date.now()/5000)),
+                          {cache:"no-store"});
+    return r.ok ? await r.text() : null;
+  }catch(e){ return null; }
 }
-
-function csv(texte) {
-  if (!texte) return [];
-  const l = texte.trim().split("\n").map(x => x.replace(/\r$/, ""));
-  const en = l[0].split(",");
-  const out = [];
-  for (let i = 1; i < l.length; i++) {
-    const c = l[i].split(",");
-    if (c.length !== en.length) continue;
-    const o = {};
-    en.forEach((k, j) => o[k] = c[j]);
-    out.push(o);
+function csv(t){
+  if(!t) return [];
+  const l = t.trim().split("\n"); if(l.length < 2) return [];
+  const en = l[0].replace(/\r$/,"").split(","), out = [];
+  for(let i=1;i<l.length;i++){
+    const c = l[i].replace(/\r$/,"").split(",");
+    if(c.length !== en.length) continue;
+    const d = {}; en.forEach((k,j)=>d[k]=c[j]); out.push(d);
   }
   return out;
 }
-
-const num = x => {
-  if (x === undefined || x === null || x === "") return null;
-  const v = Number(x);
-  return isFinite(v) ? v : null;
-};
-
-/* ---------- etat --------------------------------------------------- */
-
-let ORDRES = [];              // le carnet vivant, toutes ressources
-let HORAIRE = new Map();      // "kind|quality" -> lignes triees par heure
-let VOLUME = [];              // volumes par prix de la ressource affichee
-let VOL_KIND = null;
-let SELQ = new Set();         // les qualites cochees
-let TR_AUTO = true;           // le transport suit le marche tant qu'on n'y touche pas
-const KIND_TRANSPORT = 13;
-let AGE = "";                 // fraicheur du carnet
-let ETAT = null;              // etat.json : cycle, lot, curseur
-let PREMIER = true;           // les ecouteurs ne s'attachent qu'une fois
-const COUL = i => "var(--s" + ((i % 8) + 1) + ")";
-
-function moisRecents(n) {
-  const d = new Date(), out = [];
-  for (let i = 0; i < n; i++)
-    out.push(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1))
-      .toISOString().slice(0, 7));
+const num = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
+const nom = k => NOMS[k] || ("ressource " + k);
+const fmt = (v,d) => v==null||!isFinite(v) ? "—"
+  : v.toLocaleString("fr-FR",{minimumFractionDigits:d,maximumFractionDigits:d});
+const prix = v => v==null||!isFinite(v) ? "—" : v===0 ? "0"
+  : v.toLocaleString("fr-FR", Math.abs(v)<1 ? {minimumFractionDigits:4,maximumFractionDigits:4}
+                                            : {minimumFractionDigits:2,maximumFractionDigits:2});
+const ent = v => v==null||!isFinite(v) ? "—" : Math.round(v).toLocaleString("fr-FR");
+function court(v){                       // 1 234 567 -> 1,23 M
+  if(v==null||!isFinite(v)) return "—";
+  const a = Math.abs(v);
+  if(a >= 1e9) return (v/1e9).toFixed(2).replace(".",",")+" Md";
+  if(a >= 1e6) return (v/1e6).toFixed(2).replace(".",",")+" M";
+  if(a >= 1e3) return (v/1e3).toFixed(1).replace(".",",")+" k";
+  return Math.round(v).toString();
+}
+function duree(ms){
+  if(ms==null||!isFinite(ms)||ms<0) return "—";
+  const m = Math.floor(ms/60000);
+  if(m < 1) return "a l'instant";
+  if(m < 60) return m+" min";
+  const h = Math.floor(m/60), r = m%60;
+  if(h < 24) return h+" h"+(r?" "+r+" min":"");
+  const j = Math.floor(h/24); return j+" j"+(h%24?" "+(h%24)+" h":"");
+}
+const tsH = h => new Date(h + ":00:00Z").getTime();
+function moisRecents(n){
+  const out = [], d = new Date();
+  for(let i=0;i<n;i++){ out.push(d.toISOString().slice(0,7)); d.setMonth(d.getMonth()-1); }
   return out;
 }
 
-async function demarrer() {
+/* ============================================================== l'etat ==== */
+let PRIX = new Map();      // kind -> [{h,o,hi,lo,c,n}]  bougies du marche
+let HOR  = new Map();      // "kind|q" -> [lignes horaires]
+let ORDRES = [];           // carnet vivant
+let INSTANT = new Map();   // kind -> {p,sens,passage}
+let VOLUME = [], VOL_KIND = null;
+let ETAT = null, MAJ = null;
+let VUE = "marche", KIND = null, HEURES = 24;
+let SELQ = new Set(), QUALITES = [];
+let KINDS = [];
+
+/* ============================================================ chargement == */
+async function chargerTout(){
   const mois = moisRecents(2);
-  const [tOrdres, tHeure, ...tHist] = await Promise.all([
-    charge(L("ordres.csv")),
-    charge(L("heure_horaire.csv")),
-    ...mois.map(m => charge(HIST + "data/horaire/" + m + ".csv",
-                            "data/horaire/" + m + ".csv"))
+  const [tOrd, tIns, tHp, tHh, ...reste] = await Promise.all([
+    charge(L("ordres.csv")), charge(L("prix.csv")),
+    charge(L("heure_prix.csv")), charge(L("heure_horaire.csv")),
+    ...mois.map(m => charge(HIST + "data/prix/" + m + ".csv")),
+    ...mois.map(m => charge(HIST + "data/horaire/" + m + ".csv"))
   ]);
+  const tPrix = reste.slice(0, mois.length), tHor = reste.slice(mois.length);
 
-  // Un rafraichissement qui ne recoit RIEN (reseau coupe, GitHub qui
-  // tousse) ne doit pas effacer ce qui est deja a l'ecran : on garde
-  // l'ancien affichage et on retentera au prochain tour.
-  if (!tOrdres && !tHeure && !tHist.some(Boolean) && ORDRES.length) {
-    console.warn("rafraichissement sans reponse : on garde l'affichage");
-    return;
-  }
+  if(!tOrd && !tHh && !tHor.some(Boolean) && PRIX.size){ return false; }
 
-  ORDRES = csv(tOrdres).map(r => ({
-    k: +r.kind, q: +r.quality, id: r.order_id, sid: r.seller_id,
-    p: num(r.price), qt: num(r.qty), d: num(r.delta),
-    depuis: r.depuis || r.vu, passage: r.passage || r.maj
-  })).filter(o => o.p != null && o.qt != null);
+  ORDRES = csv(tOrd).map(r => ({
+    k:+r.kind, q:+r.quality, id:r.order_id, sid:r.seller_id,
+    p:num(r.price), qt:num(r.qty), depuis:r.depuis, passage:r.passage
+  })).filter(o => o.p!=null && o.qt!=null);
 
-  const hist = [];
-  tHist.filter(Boolean).forEach(t => hist.push(...csv(t)));
-  csv(tHeure).forEach(r => hist.push(r));       // l'heure en cours
+  INSTANT = new Map();
+  csv(tIns).forEach(r => INSTANT.set(+r.kind, {p:num(r.prix), sens:r.sens, passage:r.passage}));
 
-  if (!hist.length && !ORDRES.length) {
-    document.getElementById("sub").innerHTML =
-      '<span class="err">Aucune donnee.</span> La collecte a-t-elle deja tourne ' +
-      'avec le nouveau format ?';
-    return;
-  }
-
-  HORAIRE.clear();          // sinon chaque rafraichissement empile les heures
-  // Les volumes sont mis en cache par ressource (VOL_KIND). Sans cette
-  // remise a zero, un rafraichissement gardait les volumes du tout premier
-  // chargement : les prix bougeaient, les volumes non.
-  VOL_KIND = null;
-  for (const r of hist) {
-    const cle = (+r.kind) + "|" + (+r.quality || 0);
-    if (!HORAIRE.has(cle)) HORAIRE.set(cle, []);
-    HORAIRE.get(cle).push({
-      h: r.heure, o: num(r.ouverture), hi: num(r.haut), lo: num(r.bas),
-      c: num(r.cloture), n: num(r.n_ordres), qte: num(r.qte_totale),
-      prof: num(r.profondeur_5pct), vendu: num(r.vendu) || 0,
-      disparu: num(r.disparu) || 0, repose: num(r.repose) || 0,
-      retire: num(r.retire) || 0
-    });
-  }
-  for (const v of HORAIRE.values()) {
-    v.sort((a, b) => a.h < b.h ? -1 : 1);
-    // l'heure en cours peut apparaitre deux fois : on garde la plus recente
-    for (let i = v.length - 1; i > 0; i--) if (v[i].h === v[i - 1].h) v.splice(i - 1, 1);
-  }
-
-  const kinds = [...new Set([...ORDRES.map(o => o.k),
-    ...[...HORAIRE.keys()].map(c => +c.split("|")[0])])]
-    .sort((a, b) => nom(a).localeCompare(nom(b), "fr"));
-  const sel = document.getElementById("res");
-  const regardee = sel.value;        // ce que l'utilisateur avait choisi
-  sel.innerHTML = "";                // sinon les options s'empilent
-  for (const k of kinds) {
-    const o = document.createElement("option");
-    o.value = k; o.textContent = nom(k) + "  (" + k + ")";
-    sel.appendChild(o);
-  }
-  // on lui rend SA ressource ; le defaut ne sert qu'au premier affichage
-  sel.value = (regardee && kinds.includes(+regardee)) ? regardee
-            : (kinds.includes(146) ? "146" : String(kinds[0]));
-
-  const maj = ORDRES.reduce((m, o) => o.passage > m ? o.passage : m, "");
-  AGE = maj ? (d => d === "a l'instant" ? d : "il y a " + d)
-    (duree(Date.now() - new Date(maj).getTime())) : "";
-  // une "heure d'historique" = une heure de marche, pas une ligne de fichier
-  const heures = new Set(hist.map(r => r.heure));
-  const bornes = [...heures].sort();
-  const jour = t => t ? t.slice(8, 10) + "/" + t.slice(5, 7) : "";
-  document.getElementById("sub").innerHTML =
-    '<span class="pastille"></span>' + ent(ORDRES.length) + " offres en vente sur " +
-    kinds.length + " ressources · derniere ressource lue " + AGE +
-    " · historique : " + heures.size + " heures de marche, du " +
-    jour(bornes[0]) + " au " + jour(bornes[bornes.length - 1]);
-  document.getElementById("foot").textContent = ETAT
-    ? "Cycle " + ETAT.cycle + " · " + (ETAT.faits ?? "?") + "/" +
-      ((ETAT.kinds && ETAT.kinds.length) || 142) + " produits parcourus · " +
-      "page mise a jour a la fin de chaque run (~" + POLL / 1000 + " s de latence)"
-    : "Le carnet est reecrit a chaque fin de run. L'historique est fige heure par heure.";
-
-  if (PREMIER) {
-    PREMIER = false;
-    ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod"]
-      .forEach(id => document.getElementById(id)
-        .addEventListener("change", id === "res" ? changerRessource : dessine));
-    document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
-  }
-  changerRessource();
-}
-
-async function changerRessource() {
-  const k = document.getElementById("res").value;
-  const qs = [...new Set([
-    ...ORDRES.filter(o => o.k == k).map(o => o.q),
-    ...[...HORAIRE.keys()].filter(c => c.split("|")[0] === k).map(c => +c.split("|")[1])
-  ])].sort((a, b) => a - b);
-  if (!qs.length) qs.push(0);
-
-  const garde = new Set([...SELQ].filter(q => qs.includes(q)));
-  SELQ = garde.size ? garde : new Set([qs.includes(0) ? 0 : qs[0]]);
-
-  const box = document.getElementById("qual");
-  box.innerHTML = '<label id="l_tout"><input type="checkbox" id="q_tout"> toutes</label>' +
-    qs.map(q => '<label data-q="' + q + '"><input type="checkbox" value="' + q + '"' +
-      (SELQ.has(q) ? " checked" : "") + '> ' +
-      (q === 0 ? "0" : q + "\u2605") + '</label>').join("");
-
-  box.querySelectorAll("input[value]").forEach(i => i.addEventListener("change", () => {
-    if (i.checked) SELQ.add(+i.value); else SELQ.delete(+i.value);
-    if (!SELQ.size) { SELQ.add(+i.value); i.checked = true; }   // jamais aucune
-    marquer(qs); dessine();
-  }));
-  document.getElementById("q_tout").addEventListener("change", e => {
-    SELQ = new Set(e.target.checked ? qs : [qs.includes(0) ? 0 : qs[0]]);
-    box.querySelectorAll("input[value]").forEach(i => i.checked = SELQ.has(+i.value));
-    marquer(qs); dessine();
+  // --- bougies de prix : historique + heure en cours ---
+  PRIX = new Map();
+  const versePrix = t => csv(t).forEach(r => {
+    const k = +r.kind;
+    if(!PRIX.has(k)) PRIX.set(k, []);
+    PRIX.get(k).push({h:r.heure, o:num(r.ouverture), hi:num(r.haut),
+                      lo:num(r.bas), c:num(r.cloture), n:num(r.n_releves)});
   });
-  marquer(qs);
+  tPrix.filter(Boolean).forEach(versePrix); versePrix(tHp);
 
-  if (VOL_KIND !== k) {
-    VOL_KIND = k;
-    VOLUME = [];
-    const [tv, th] = await Promise.all([
-      Promise.all(moisRecents(2).map(m =>
-        charge(HIST + "data/volume/" + k + "/" + m + ".csv",
-               "data/volume/" + k + "/" + m + ".csv"))),
-      charge(L("heure_volume.csv"))
-    ]);
-    tv.filter(Boolean).forEach(t => VOLUME.push(...csv(t)));
-    csv(th).filter(r => r.kind == k).forEach(r => VOLUME.push(r));
-    VOLUME = VOLUME.map(r => ({h: r.heure, q: +r.quality, p: num(r.prix),
-                               v: num(r.vendu) || 0, d: num(r.disparu) || 0,
-                               n: num(r.n_evt) || 0}))
-                   .filter(r => r.p != null);
+  // --- agregats par qualite : historique + heure en cours ---
+  HOR = new Map();
+  const verseHor = t => csv(t).forEach(r => {
+    const cle = (+r.kind)+"|"+(+r.quality||0);
+    if(!HOR.has(cle)) HOR.set(cle, []);
+    HOR.get(cle).push({h:r.heure, o:num(r.ouverture), hi:num(r.haut), lo:num(r.bas),
+      c:num(r.cloture), n:num(r.n_ordres), qte:num(r.qte_totale),
+      prof:num(r.profondeur_5pct), vendu:num(r.vendu)||0, disparu:num(r.disparu)||0,
+      repose:num(r.repose)||0, retire:num(r.retire)||0, pose:num(r.pose)||0});
+  });
+  tHor.filter(Boolean).forEach(verseHor); verseHor(tHh);
+
+  // une heure peut apparaitre deux fois (archive + heure en cours) : on garde
+  // la plus recente, jamais les deux
+  const dedoublonne = m => m.forEach(v => {
+    v.sort((a,b) => a.h < b.h ? -1 : 1);
+    for(let i=v.length-1;i>0;i--) if(v[i].h === v[i-1].h) v.splice(i-1,1);
+  });
+  dedoublonne(PRIX); dedoublonne(HOR);
+
+  KINDS = [...new Set([...PRIX.keys(), ...ORDRES.map(o=>o.k),
+                       ...[...HOR.keys()].map(c=>+c.split("|")[0])])]
+          .sort((a,b) => nom(a).localeCompare(nom(b),"fr"));
+  return true;
+}
+
+async function chargerVolume(k){
+  if(VOL_KIND === k) return;
+  VOL_KIND = k; VOLUME = [];
+  const [tv, th] = await Promise.all([
+    Promise.all(moisRecents(2).map(m =>
+      charge(HIST + "data/volume/" + k + "/" + m + ".csv"))),
+    charge(L("heure_volume.csv"))
+  ]);
+  const pousse = r => VOLUME.push({h:r.heure, q:+r.quality, p:num(r.prix),
+                                   v:num(r.vendu)||0, d:num(r.disparu)||0});
+  tv.filter(Boolean).forEach(t => csv(t).forEach(pousse));
+  csv(th).filter(r => +r.kind === k).forEach(pousse);
+  VOLUME = VOLUME.filter(r => r.p != null);
+}
+/* ============================================== briques de graphique ======
+   Tout est dessine a la main en SVG : marques fines, grille en filet, axes
+   pleins (jamais pointilles), et une couche de survol sur CHAQUE graphique.  */
+const SVGNS = "http://www.w3.org/2000/svg";
+const bulle = document.getElementById("bulle");
+function montreBulle(e, html){
+  bulle.innerHTML = html; bulle.style.opacity = 1;
+  const r = bulle.getBoundingClientRect();
+  let x = e.clientX + 14, y = e.clientY - r.height - 10;
+  if(x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+  if(y < 8) y = e.clientY + 16;
+  bulle.style.left = x+"px"; bulle.style.top = y+"px";
+}
+const cacheBulle = () => bulle.style.opacity = 0;
+
+function svg(w, h){
+  const s = document.createElementNS(SVGNS,"svg");
+  s.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  s.setAttribute("preserveAspectRatio","xMidYMid meet");
+  s.setAttribute("role","img");
+  return s;
+}
+function el(p, t, a, txt){
+  const n = document.createElementNS(SVGNS,t);
+  for(const k in a) if(a[k] != null) n.setAttribute(k, a[k]);
+  if(txt != null) n.textContent = txt;
+  p.appendChild(n); return n;
+}
+// echelle lineaire, avec des bornes "rondes" pour que les ticks tombent juste
+function bornes(min, max, n){
+  if(!isFinite(min) || !isFinite(max)) return {min:0, max:1, pas:1};
+  if(min === max){ min -= Math.abs(min)*.05 || .5; max += Math.abs(max)*.05 || .5; }
+  const brut = (max-min)/n, mag = Math.pow(10, Math.floor(Math.log10(brut)));
+  const pas = [1,2,2.5,5,10].map(x=>x*mag).find(x => x >= brut) || mag*10;
+  return {min: Math.floor(min/pas)*pas, max: Math.ceil(max/pas)*pas, pas};
+}
+function ticksY(g, y0, y1, vmin, vmax, pas, x0, x1, format){
+  for(let v = vmin; v <= vmax + pas/1e6; v += pas){
+    const y = y1 - (v-vmin)/(vmax-vmin) * (y1-y0);
+    el(g,"line",{x1:x0,x2:x1,y1:y,y2:y,class:"g-grille"});
+    el(g,"text",{x:x0-7,y:y+3.5,"text-anchor":"end",class:"g-tick"}, format(v));
   }
-  dessine();
+}
+// couleur divergente : bleu (hausse) <-> gris neutre <-> rouge (baisse)
+function couleurVar(p){
+  if(p == null || !isFinite(p)) return "var(--neutre)";
+  const t = Math.max(-1, Math.min(1, p/8));      // sature a +/- 8 %
+  if(Math.abs(t) < .06) return "var(--neutre)";
+  return t > 0 ? `color-mix(in oklab, var(--hausse) ${Math.round(Math.abs(t)*100)}%, var(--neutre))`
+               : `color-mix(in oklab, var(--baisse) ${Math.round(Math.abs(t)*100)}%, var(--neutre))`;
 }
 
-function marquer(qs) {
-  document.querySelectorAll("#qual label[data-q]").forEach(l =>
-    l.classList.toggle("on", SELQ.has(+l.dataset.q)));
-  const t = document.getElementById("q_tout");
-  if (t) {
-    t.checked = SELQ.size === qs.length;
-    document.getElementById("l_tout").classList.toggle("on", t.checked);
+/* ================================================== agregats par produit == */
+function depuisMs(){ return HEURES ? Date.now() - HEURES*3600e3 : 0; }
+function resumeProduit(k){
+  const d0 = depuisMs();
+  const px = (PRIX.get(k)||[]).filter(r => tsH(r.h) >= d0);
+  let vol = 0, val = 0, evt = 0;
+  for(const [cle, lignes] of HOR){
+    if(+cle.split("|")[0] !== k) continue;
+    for(const r of lignes){
+      if(tsH(r.h) < d0) continue;
+      const v = r.vendu + r.disparu;
+      vol += v; val += v * (r.c ?? r.o ?? 0); evt += 1;
+    }
   }
+  const carnet = ORDRES.filter(o => o.k === k).sort((a,b) => a.p-b.p);
+  const meilleur = INSTANT.get(k)?.p ?? (carnet[0]?.p ?? px.at(-1)?.c ?? null);
+  const ref = px.length ? px[0].o : null;
+  const varp = (ref && meilleur) ? (meilleur/ref - 1)*100 : null;
+  const prof = carnet.length
+    ? carnet.filter(o => o.p <= carnet[0].p*1.05).reduce((s,o)=>s+o.qt,0) : null;
+  return {k, px, vol, val, meilleur, varp, prof, carnet,
+          offres: carnet.length, qte: carnet.reduce((s,o)=>s+o.qt,0)};
 }
 
-/* ---------- dessin ------------------------------------------------- */
-
-const W = 880, H = 260, M = {t: 14, r: 54, b: 30, l: 62};
-
-const svg = (inner, h) => '<svg viewBox="0 0 ' + W + ' ' + (h || H) +
-  '" preserveAspectRatio="xMidYMid meet">' + inner + '</svg>';
-
-function echelle(min, max, taille) {
-  if (min === max) { min -= 1; max += 1; }
-  const pad = (max - min) * 0.08;
-  min -= pad; max += pad;
-  return v => taille - (v - min) / (max - min) * taille;
-}
-
-function ticks(min, max, n) {
-  if (min === max) return [min];
-  const brut = (max - min) / n;
-  const mag = Math.pow(10, Math.floor(Math.log10(brut)));
-  const pas = [1, 2, 2.5, 5, 10].map(x => x * mag).find(x => x >= brut) || mag * 10;
-  const out = [];
-  for (let v = Math.ceil(min / pas) * pas; v <= max + 1e-9; v += pas) out.push(v);
+/* ============================================== carte du marche (treemap) =
+   Un treemap "squarifie" : 142 categories dans un espace fixe, la surface
+   porte la magnitude et la couleur la polarite. Une barre a 142 colonnes
+   serait illisible ; un camembert, pire encore.                            */
+function squarifie(items, x, y, w, h){
+  const out = [], total = items.reduce((s,i)=>s+i.v,0);
+  if(total <= 0) return out;
+  let reste = items.slice().sort((a,b)=>b.v-a.v), X=x, Y=y, W=w, H=h;
+  let echelle = (W*H)/total;
+  const pire = (r, cote) => {
+    const s = r.reduce((a,b)=>a+b.v,0)*echelle;
+    const mx = r[0].v*echelle, mn = r.at(-1).v*echelle;
+    return Math.max(cote*cote*mx/(s*s), s*s/(cote*cote*mn));
+  };
+  while(reste.length){
+    const vert = W >= H, cote = vert ? H : W;
+    let rang = [reste[0]], i = 1;
+    while(i < reste.length){
+      const essai = rang.concat(reste[i]);
+      if(pire(essai, cote) > pire(rang, cote)) break;
+      rang = essai; i++;
+    }
+    const s = rang.reduce((a,b)=>a+b.v,0)*echelle;
+    const ep = s/cote;
+    let d = vert ? Y : X;
+    for(const it of rang){
+      const l = it.v*echelle/ep;
+      out.push(vert ? {...it, x:X, y:d, w:ep, h:l} : {...it, x:d, y:Y, w:l, h:ep});
+      d += l;
+    }
+    if(vert){ X += ep; W -= ep; } else { Y += ep; H -= ep; }
+    reste = reste.slice(rang.length);
+    if(W < .5 || H < .5) break;
+  }
   return out;
 }
 
-const grille = (vals, y, dec, lw) => vals.map(v =>
-  '<line class="gl" x1="0" y1="' + y(v).toFixed(1) + '" x2="' + lw +
-  '" y2="' + y(v).toFixed(1) + '"/><text class="tk r" x="-8" y="' +
-  (y(v) + 4).toFixed(1) + '">' + (dec === null ? prix(v) : fmt(v, dec)) +
-  '</text>').join("");
-
-const vide = m => '<p class="dim" style="padding:26px 0 34px;text-align:center">' + m + '</p>';
-
-function axeTemps(p, x, lh) {
-  const n = Math.min(6, p.length), out = [];
-  for (let j = 0; j < n; j++) {
-    const i = Math.round(j / (n - 1 || 1) * (p.length - 1)), h = p[i].h;
-    out.push('<text class="tk m" x="' + x(i).toFixed(1) + '" y="' + (lh + 18) + '">' +
-      h.slice(8, 10) + "/" + h.slice(5, 7) + " " + h.slice(11, 13) + "h</text>");
+function dessineCarte(lignes){
+  const box = document.getElementById("c_carte");
+  const items = lignes.filter(r => r.val > 0).map(r => ({v:r.val, r}));
+  if(!items.length){ box.innerHTML = '<div class="vide">Pas encore de volume sur cette periode.</div>'; return; }
+  const W = 1100, H = 420;
+  const s = svg(W, H); s.setAttribute("aria-label","Carte du marche par valeur echangee");
+  const cases = squarifie(items, 0, 0, W, H);
+  for(const c of cases){
+    const g = el(s,"g",{});
+    // 2 px de surface entre les pavés : un ecart, jamais un contour
+    el(g,"rect",{x:c.x+1, y:c.y+1, width:Math.max(0,c.w-2), height:Math.max(0,c.h-2),
+                 rx:3, fill:couleurVar(c.r.varp), stroke:"var(--bord)","stroke-width":1});
+    // Une etiquette ne s'ecrit que si elle tient AVEC sa marge : un mot
+    // rogne par son propre pave est pire que pas de mot du tout — la valeur
+    // reste lisible au survol et dans le tableau.
+    const dispo = c.w - 16;
+    if(dispo > 54 && c.h > 28){
+      // 11,5 px en gras coutent ~6,9 px par caractere : sous-estimer,
+      // c'est laisser un mot deborder sur le pave voisin.
+      const n = nom(c.r.k), max = Math.floor(dispo / 6.9);
+      el(g,"text",{x:c.x+8, y:c.y+18, class:"g-nom"},
+         n.length > max ? n.slice(0, Math.max(2, max-1)) + "…" : n);
+      if(c.h > 44 && dispo > 54)
+        el(g,"text",{x:c.x+8, y:c.y+33, class:"g-tick"}, court(c.r.val)+" $");
+    }
+    g.style.cursor = "pointer";
+    g.addEventListener("mousemove", e => montreBulle(e,
+      `<b>${nom(c.r.k)}</b><br>${court(c.r.val)} $ echanges<br>` +
+      `${court(c.r.vol)} unites<br>prix ${prix(c.r.meilleur)} $ ` +
+      `<span class="${(c.r.varp||0)>=0?"up":"down"}">` +
+      `${c.r.varp==null?"—":(c.r.varp>=0?"+":"")+fmt(c.r.varp,2)+" %"}</span>`));
+    g.addEventListener("mouseleave", cacheBulle);
+    g.addEventListener("click", () => { cacheBulle(); ouvreProduit(c.r.k); });
   }
-  return out.join("");
+  box.innerHTML = ""; box.appendChild(s);
+  document.getElementById("l_carte").innerHTML =
+    `<span><i style="background:var(--baisse)"></i>baisse</span>` +
+    `<span><i style="background:var(--neutre);border:1px solid var(--bord)"></i>stable</span>` +
+    `<span><i style="background:var(--hausse)"></i>hausse</span>` +
+    `<span class="dim">surface = valeur echangee</span>`;
+}
+/* ================================================= tuiles et tableau 142 == */
+function tuile(k, v, n, cls){
+  return `<div class="tuile"><div class="k">${k}</div>
+    <div class="v ${cls||""}">${v}</div><div class="n">${n||""}</div></div>`;
+}
+function rendMarche(){
+  const lignes = KINDS.map(resumeProduit).filter(r => r.px.length || r.offres);
+  const valTot = lignes.reduce((s,r)=>s+r.val,0);
+  const actifs = lignes.filter(r => r.vol > 0).length;
+  const hausse = lignes.filter(r => (r.varp||0) > .5).length;
+  const baisse = lignes.filter(r => (r.varp||0) < -.5).length;
+  const per = HEURES ? HEURES+" h" : "tout l'historique";
+  document.getElementById("t_marche").innerHTML =
+    tuile("Valeur echangee", court(valTot)+" $", "sur "+per) +
+    tuile("Ressources actives", actifs+" / "+lignes.length,
+          "au moins une vente observee") +
+    tuile("En hausse", hausse, "contre "+baisse+" en baisse",
+          hausse >= baisse ? "up" : "") +
+    tuile("Fraicheur des donnees", ETAT ? duree(Date.now()-MAJ) : "—",
+          ETAT ? "cycle "+ETAT.cycle+", "+(ETAT.dernier_cycle_sec||"?")+" s par tour" : "");
+
+  dessineCarte(lignes);
+  rendTable142(lignes);
 }
 
-function survol(el, cle, p, lw, texte) {
-  const hit = el.querySelector("#hit_" + cle), cr = el.querySelector("#cr_" + cle),
-        tip = document.getElementById("t_" + cle);
-  if (!hit) return;
-  hit.addEventListener("mousemove", e => {
-    const r = hit.getBoundingClientRect();
-    const i = Math.max(0, Math.min(p.length - 1,
-      Math.round((e.clientX - r.left) / r.width * (p.length - 1))));
-    const xs = i / (p.length - 1 || 1) * lw;
-    if (cr) { cr.setAttribute("x1", xs); cr.setAttribute("x2", xs); cr.setAttribute("opacity", "1"); }
-    tip.innerHTML = texte(i);
-    tip.style.opacity = "1";
-    const c = el.parentElement.getBoundingClientRect();
-    tip.style.left = Math.min(c.width - 180, Math.max(8, e.clientX - c.left + 12)) + "px";
-    tip.style.top = (e.clientY - c.top - 6) + "px";
+let TRI = {col:"val", sens:-1};
+function rendTable142(lignes){
+  const cols = [
+    ["nom","Ressource",r=>nom(r.k),r=>nom(r.k)],
+    ["prix","Prix",r=>r.meilleur,r=>prix(r.meilleur)+" $"],
+    ["varp","Variation",r=>r.varp??-1e9,r=> r.varp==null?'<span class="dim">—</span>'
+       :`<span class="${r.varp>=0?"up":"down"}">${r.varp>=0?"+":""}${fmt(r.varp,2)} %</span>`],
+    ["val","Valeur echangee",r=>r.val,r=>court(r.val)+" $"],
+    ["vol","Volume",r=>r.vol,r=>court(r.vol)],
+    ["prof","Profondeur -5 %",r=>r.prof??-1,r=>r.prof==null?'<span class="dim">—</span>':court(r.prof)],
+    ["qte","En vente",r=>r.qte,r=>court(r.qte)],
+    ["offres","Offres",r=>r.offres,r=>r.offres],
+  ];
+  const t = document.getElementById("t_142");
+  const arr = lignes.slice().sort((a,b)=>{
+    const c = cols.find(c=>c[0]===TRI.col);
+    const x = c[2](a), y = c[2](b);
+    return (typeof x === "string" ? x.localeCompare(y,"fr") : x-y) * TRI.sens;
   });
-  hit.addEventListener("mouseleave", () => {
-    if (cr) cr.setAttribute("opacity", "0");
-    tip.style.opacity = "0";
+  t.innerHTML =
+    "<thead><tr>" + cols.map(c =>
+      `<th class="tri" data-c="${c[0]}"${TRI.col===c[0]?` aria-sort="${TRI.sens<0?"descending":"ascending"}"`:""}>`
+      + c[1] + (TRI.col===c[0] ? (TRI.sens<0?" ↓":" ↑") : "") + "</th>").join("")
+    + "</tr></thead><tbody>" + arr.map(r =>
+      `<tr class="cliquable" data-k="${r.k}">` + cols.map(c=>`<td>${c[3](r)}</td>`).join("") + "</tr>"
+    ).join("") + "</tbody>";
+  t.querySelectorAll("th.tri").forEach(th => th.onclick = () => {
+    const c = th.dataset.c;
+    TRI = {col:c, sens: TRI.col===c ? -TRI.sens : (c==="nom" ? 1 : -1)};
+    rendTable142(lignes);
   });
+  t.querySelectorAll("tr.cliquable").forEach(tr =>
+    tr.onclick = () => ouvreProduit(+tr.dataset.k));
 }
 
-/* ---------- le rendu ----------------------------------------------- */
-
-function serieQ(k, q) { return HORAIRE.get(k + "|" + q) || []; }
-
-// Fusionne plusieurs qualites en une seule serie : le prix retenu est le
-// MEILLEUR des qualites cochees (c'est celui que verrait un acheteur), les
-// quantites et les volumes s'additionnent.
-function fusion(k, qs, depuis) {
-  if (qs.length === 1) {
-    const p = serieQ(k, qs[0]);
-    return depuis ? p.filter(x => x.h >= depuis) : p.slice();
-  }
-  const m = new Map(), mn = (a, b) => a == null ? b : (b == null ? a : Math.min(a, b));
-  for (const q of qs) for (const p of serieQ(k, q)) {
-    if (depuis && p.h < depuis) continue;
-    let a = m.get(p.h);
-    if (!a) m.set(p.h, a = {h: p.h, o: null, hi: null, lo: null, c: null, n: 0,
-                            qte: 0, prof: null, vendu: 0, disparu: 0,
-                            repose: 0, retire: 0});
-    a.o = mn(a.o, p.o); a.hi = mn(a.hi, p.hi);
-    a.lo = mn(a.lo, p.lo); a.c = mn(a.c, p.c);
-    a.n += p.n || 0; a.qte += p.qte || 0;
-    if (p.prof != null) a.prof = (a.prof || 0) + p.prof;
-    a.vendu += p.vendu; a.disparu += p.disparu;
-    a.repose += p.repose; a.retire += p.retire;
-  }
-  return [...m.values()].sort((a, b) => a.h < b.h ? -1 : 1);
-}
-
-// Le transport est un produit du marche comme un autre : on prend son prix
-// en direct, sauf si tu as saisi le tien.
-function majTransport() {
-  const off = ORDRES.filter(o => o.k === KIND_TRANSPORT && o.q === 0);
-  const m = off.length ? Math.min(...off.map(o => o.p)) : null;
-  const ind = document.getElementById("tr_marche");
-  const champ = document.getElementById("i_tr");
-  if (m == null) { ind.textContent = ""; return; }
-  ind.textContent = TR_AUTO ? "marche : " + prix(m) + " $"
-                            : "marche : " + prix(m) + " $ · ton prix retenu";
-  if (TR_AUTO) champ.value = m;
-}
-
-function dessine() {
-  const k = document.getElementById("res").value;
-  const qs = [...SELQ].sort((a, b) => a - b);
-  const jours = +document.getElementById("jours").value;
-
-  const toutes = fusion(k, qs, "");
-  let depuis = "";
-  if (jours < 9999 && toutes.length) {
-    const fin = new Date(toutes[toutes.length - 1].h + ":00:00Z").getTime();
-    depuis = new Date(fin - jours * 864e5).toISOString().slice(0, 13);
-  }
-  const pts = depuis ? toutes.filter(p => p.h >= depuis) : toutes;
-  const carnet = ORDRES.filter(o => o.k == k && SELQ.has(o.q))
-                       .sort((a, b) => a.p - b.p);
-
-  majTransport();
-  kpis(pts, carnet, qs);
-  demande(qs, depuis, carnet, pts);
-  courbePrix(k, qs, depuis, pts);
-  courbeProfondeur(pts);
-  profilHoraire(toutes);
-  echelleQualite(k);
-  tableCarnet(carnet);
-  netVente(carnet, pts);
-  tableau(pts);
-}
-
-// Depuis quand la ressource affichee n'a-t-elle pas ete relue ? Ce n'est PAS
-// la meme chose que la fraicheur du carnet entier : un tour de piste dure
-// plusieurs minutes, donc la ressource qu'on regarde peut avoir ete lue bien
-// avant la derniere. Afficher la fraicheur globale ferait passer un prix
-// perime pour un prix a l'instant.
-function vuLe(carnet) {
-  if (!carnet.length) return null;
-  return carnet.reduce((m, o) => o.passage > m ? o.passage : m, "");
-}
-
-function kpis(pts, carnet, qs) {
-  const box = document.getElementById("kpis");
-  const vu = vuLe(carnet);
-  const retard = vu ? Date.now() - new Date(vu).getTime() : null;
-  const vieux = retard != null && retard > 8 * 60000;
-  const avecPrix = pts.filter(p => p.c != null);
-  const der = avecPrix[avecPrix.length - 1];
-  // le meilleur prix, c'est le moins cher REELLEMENT en vente maintenant
-  const meilleur = carnet.length ? carnet[0].p : null;
-  const base = meilleur ?? (der && der.c);
-  const p24 = der ? new Date(der.h + ":00:00Z").getTime() - 24 * 3600e3 : 0;
-  const ref = avecPrix.filter(p => new Date(p.h + ":00:00Z").getTime() <= p24).pop();
-  const var24 = (ref && base) ? (base / ref.c - 1) * 100 : null;
-  const prof = carnet.length
-    ? carnet.filter(o => o.p <= carnet[0].p * 1.05).reduce((s, o) => s + o.qt, 0)
-    : null;
-  const recents = pts.filter(p => new Date(p.h + ":00:00Z").getTime() > p24);
-  const v24 = recents.reduce((s, p) => s + p.vendu, 0);
-  const d24 = recents.reduce((s, p) => s + p.disparu, 0);
-  const r24 = recents.reduce((s, p) => s + p.retire, 0);
-  const bas = avecPrix.length ? Math.min(...avecPrix.map(p => p.lo ?? p.c)) : null;
-  const haut = avecPrix.length ? Math.max(...avecPrix.map(p => p.hi ?? p.c)) : null;
-
-  box.innerHTML = [
-    ["Meilleur prix", prix(base) + " $",
-      !carnet.length ? "dernier releve horaire (carnet vide)"
-      : (vieux ? '<span class="err">lu il y a ' + duree(retard) +
-                 " — peut avoir change</span>"
-               : "le moins cher en vente, lu il y a " + duree(retard))],
-    ["Variation 24 h", var24 == null ? "—" :
-      '<span class="' + (var24 >= 0 ? "up" : "down") + '">' +
-      (var24 >= 0 ? "+" : "") + fmt(var24, 2) + " %</span>",
-      ref ? "depuis " + prix(ref.c) + " $" : "pas assez de recul"],
-    ["Haut / bas de la periode", bas == null ? "—" : prix(bas) + " – " + prix(haut),
-      bas > 0 ? "ecart de " + fmt((haut / bas - 1) * 100, 1) + " %" : "sur le meilleur prix"],
-    ["Profondeur a -5 %", prof != null ? ent(prof) + " u" : "—",
-      carnet.length + " offres sur " + qs.length + " qualite(s)"],
-    ["Vendu sur 24 h", (v24 + d24) ? ent(v24 + d24) + " u" : "—",
-      (v24 + d24) ? ent(v24) + " u mesurees · " + ent(d24) + " u deduites"
-                  : "se remplit avec le temps"]
-  ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
-    b + '</div><div class="n">' + c + '</div></div>').join("");
-}
-
-/* --- LA courbe de demande : combien part par jour selon le prix ---------
-   Un acheteur prend toujours le moins cher. Donc tout ce qui s'est echange a
-   6,60 $ ou PLUS CHER, on l'aurait capte en se placant a 6,60. On cumule
-   donc du prix le plus haut vers le plus bas. --------------------------- */
-function demande(qs, depuis, carnet, pts) {
-  const elD = document.getElementById("c_dem"), elR = document.getElementById("c_rev");
-  const ventes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
-
-  // Le debit se divise par les heures REELLEMENT OBSERVEES, pas par les heures
-  // ou il s'est passe quelque chose : une heure calme compte aussi.
-  const observees = pts.length;
-  const jours = Math.max(observees / 24, 1 / 24);
-
+/* ================================== bougies + volume + profil (une figure) =
+   Trois vues du meme fait, cousues par leurs axes : les bougies et le profil
+   partagent l'axe des PRIX, les bougies et le volume partagent l'axe du
+   TEMPS. Rien n'est superpose sur une seconde echelle — deux mesures de
+   nature differente n'ont jamais le droit de partager un axe.              */
+/* Les bougies viennent du ticker quand il couvre l'heure (~115 releves), et
+   des agregats par qualite sinon (~15 releves). On prefere toujours le
+   ticker ; le repli evite qu'un graphique de 48 heures n'en montre que 10. */
+function bougies(k, d0){
   const par = new Map();
-  let mes = 0, ded = 0;
-  for (const r of ventes) {
-    mes += r.v; ded += r.d;
-    // Une offre entierement achetee est une vente au meme titre qu'une offre
-    // grignotee : la seule difference est qu'on la DEDUIT au lieu de la
-    // mesurer. Les separer dans le total n'avait aucun sens.
-    const v = r.v + r.d;
-    if (v > 0) par.set(r.p, (par.get(r.p) || 0) + v);
+  for(const [cle, lignes] of HOR){
+    if(+cle.split("|")[0] !== k) continue;
+    for(const r of lignes){
+      if(tsH(r.h) < d0 || r.c == null) continue;
+      // Le ticker publie le MEILLEUR prix, c'est-a-dire le minimum entre
+      // qualites. Le repli doit dire la meme chose, sinon la qualite 10 (a
+      // 17 $) ecrase une bougie dont le marche est a 6,50 $. Donc minimum
+      // partout, y compris sur le plus haut : le maximum d'un minimum ne
+      // depasse jamais le minimum des maximums.
+      const a = par.get(r.h);
+      const mn = (x, y) => x == null ? y : y == null ? x : Math.min(x, y);
+      if(!a) par.set(r.h, {h:r.h, o:r.o, hi:r.hi ?? r.c, lo:r.lo ?? r.c,
+                           c:r.c, n:0, replie:true});
+      else {
+        a.hi = mn(a.hi, r.hi ?? r.c);
+        a.lo = mn(a.lo, r.lo ?? r.c);
+        a.o  = mn(a.o,  r.o);
+        a.c  = mn(a.c,  r.c);
+      }
+    }
   }
-  const paliers = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
-  const total = paliers.reduce((s2, x) => s2 + x.v, 0);
+  for(const r of (PRIX.get(k)||[])){          // le ticker a toujours raison
+    if(tsH(r.h) < d0 || r.c == null) continue;
+    par.set(r.h, {...r, replie:false});
+  }
+  return [...par.values()].sort((a,b) => a.h < b.h ? -1 : 1);
+}
 
-  // L'axe couvre TOUTE l'amplitude de prix de la periode, pas seulement les
-  // prix ou une vente a eu lieu : savoir qu'au-dessus de X rien ne part est
-  // une information a part entiere.
-  const cotes = pts.flatMap(p => [p.lo, p.hi, p.c]).filter(v => v != null);
-  const bornes = cotes.concat(paliers.map(x => x.p));
-  const x0 = bornes.length ? Math.min(...bornes) : 0;
-  const x1 = bornes.length ? Math.max(...bornes) : 1;
-
-  // On ne cache pas la part de deduction : elle reste affichee, mais comme
-  // une indication de FIABILITE, pas comme un volume separe.
-  const part = mes + ded > 0 ? Math.round(ded / (mes + ded) * 100) : 0;
-  document.getElementById("n_mes").textContent = mes + ded
-    ? "Sur ces ventes, " + ent(mes) + " u sont mesurees (une offre a perdu de "
-      + "la quantite) et " + ent(ded) + " u sont deduites (l'offre entiere a "
-      + "disparu alors qu'elle etait la moins chere) — soit " + part + " % de deduction."
-    : "";
-
-  volumeParPrix(paliers, total, x0, x1);
-
-  const base = observees < 24 ? observees + " heures observees"
-             : fmt(jours, 1) + " jours observes";
-  document.getElementById("h_dem").textContent =
-    "Combien le marche absorbe par jour selon le prix ou tu te places, et ce que " +
-    "ca te laisse une fois les frais payes. Sur " + base + ", de " + prix(x0) +
-    " a " + prix(x1) + " $.";
-
-  if (!paliers.length || x1 <= x0) {
-    document.getElementById("n_dem").innerHTML =
-      "Pas encore assez de ventes enregistrees pour tracer la demande.";
-    elD.innerHTML = ""; elR.innerHTML = ""; return;
+function dessineBougies(k){
+  const box = document.getElementById("c_bougies");
+  const d0 = depuisMs();
+  const px = bougies(k, d0);
+  if(px.length < 2){
+    box.innerHTML = '<div class="vide">Pas encore assez d\'historique pour tracer des bougies.</div>';
+    document.getElementById("f_bougies").textContent = ""; return;
+  }
+  // volume horaire, qualites choisies
+  const volH = new Map();
+  for(const q of SELQ){
+    for(const r of (HOR.get(k+"|"+q)||[])){
+      if(tsH(r.h) < d0) continue;
+      volH.set(r.h, (volH.get(r.h)||0) + r.vendu + r.disparu);
+    }
+  }
+  // profil de volume par prix
+  const parPrix = new Map();
+  for(const r of VOLUME){
+    if(!SELQ.has(r.q) || tsH(r.h) < d0) continue;
+    parPrix.set(r.p, (parPrix.get(r.p)||0) + r.v + r.d);
   }
 
-  const absorbe = P => {
-    let s2 = 0;
-    for (const x of paliers) if (x.p >= P - 1e-9) s2 += x.v;
-    return s2 / jours;
+  const W=1100, HC=300, HV=92, MG={g:58,d:196,ht:30,b:26}, ECART=34;
+  const H = MG.ht + HC + ECART + HV + MG.b;
+  const s = svg(W,H); s.setAttribute("aria-label","Prix, volume et profil de volume");
+  const x0=MG.g, x1=W-MG.d, yc0=MG.ht, yc1=MG.ht+HC;
+  const yv0=yc1+ECART, yv1=yv0+HV;
+
+  const bas = Math.min(...px.map(r=>r.lo ?? r.c)), haut = Math.max(...px.map(r=>r.hi ?? r.c));
+  const bp = bornes(bas, haut, 5);
+  const Y = v => yc1 - (v-bp.min)/(bp.max-bp.min)*(yc1-yc0);
+  const pas = (x1-x0)/px.length, larg = Math.max(1.6, Math.min(11, pas*0.62));
+
+  ticksY(s, yc0, yc1, bp.min, bp.max, bp.pas, x0, x1, v=>prix(v));
+  el(s,"line",{x1:x0,x2:x0,y1:yc0,y2:yc1,class:"g-axe"});
+
+  // --- les bougies ---
+  px.forEach((r,i) => {
+    const cx = x0 + pas*(i+.5);
+    const monte = (r.c ?? 0) >= (r.o ?? 0);
+    const col = monte ? "var(--hausse)" : "var(--baisse)";
+    el(s,"line",{x1:cx,x2:cx,y1:Y(r.hi ?? r.c),y2:Y(r.lo ?? r.c),
+                 stroke:col,"stroke-width":1.4,"stroke-linecap":"round"});
+    const a=Y(r.o ?? r.c), b=Y(r.c);
+    el(s,"rect",{x:cx-larg/2, y:Math.min(a,b), width:larg,
+                 height:Math.max(1.4, Math.abs(b-a)), rx:1.4, fill:col});
+  });
+
+  // --- le volume, sous les bougies, meme axe du temps ---
+  const vmax = Math.max(1, ...px.map(r => volH.get(r.h)||0));
+  const bv = bornes(0, vmax, 2);
+  const YV = v => yv1 - v/bv.max*(yv1-yv0);
+  ticksY(s, yv0, yv1, 0, bv.max, bv.pas, x0, x1, v=>court(v));
+  el(s,"line",{x1:x0,x2:x1,y1:yv1,y2:yv1,class:"g-axe"});
+  px.forEach((r,i) => {
+    const v = volH.get(r.h)||0; if(!v) return;
+    const cx = x0 + pas*(i+.5), hh = yv1 - YV(v);
+    el(s,"rect",{x:cx-larg/2, y:YV(v), width:larg, height:Math.max(1,hh),
+                 rx:Math.min(2, larg/2), fill:"var(--s1)", opacity:.82});
+  });
+  el(s,"text",{x:x0, y:yv0-9, class:"g-titre"}, "Volume echange par heure");
+
+  // --- l'axe du temps, partage ---
+  const nEt = Math.min(8, px.length);
+  for(let i=0;i<nEt;i++){
+    const j = Math.round(i*(px.length-1)/(nEt-1||1));
+    const cx = x0 + pas*(j+.5), h = px[j].h;
+    el(s,"text",{x:cx, y:yv1+15, "text-anchor":"middle", class:"g-tick"},
+       h.slice(11,13)+"h");
+    if(i===0 || px[j].h.slice(8,10) !== px[Math.max(0,j-1)].h.slice(8,10))
+      el(s,"text",{x:cx, y:yv1+25, "text-anchor":"middle", class:"g-tick",
+                   "font-size":9.5}, h.slice(8,10)+"/"+h.slice(5,7));
+  }
+
+  // --- le profil de volume, a droite, axe des PRIX partage ---
+  const px0 = x1+30, px1 = W-8;
+  el(s,"text",{x:px0, y:yc0-11, class:"g-titre"}, "Volume par prix");
+  const paliers = [...parPrix.entries()].filter(([p,v]) => v>0 && p>=bp.min && p<=bp.max);
+  const pmax = Math.max(1, ...paliers.map(([,v])=>v));
+  const epais = Math.max(2, Math.min(9, (yc1-yc0)/Math.max(paliers.length,1)*0.8));
+  paliers.forEach(([p,v]) => {
+    const y = Y(p), w = (v/pmax)*(px1-px0);
+    const r = el(s,"rect",{x:px0, y:y-epais/2, width:Math.max(1.5,w), height:epais,
+                           rx:Math.min(2,epais/2), fill:"var(--s1)", opacity:.8});
+    r.addEventListener("mousemove", e => montreBulle(e,
+      `<b>${prix(p)} $</b><br>${ent(v)} unites echangees a ce prix`));
+    r.addEventListener("mouseleave", cacheBulle);
+  });
+  if(!paliers.length)
+    el(s,"text",{x:px0, y:(yc0+yc1)/2, class:"g-tick"}, "aucune vente observee");
+
+  // --- couche de survol : une bande par heure, large de la colonne ---
+  const gh = el(s,"g",{});
+  px.forEach((r,i) => {
+    const cx = x0 + pas*(i+.5);
+    const z = el(gh,"rect",{x:cx-pas/2, y:yc0, width:pas, height:yv1-yc0,
+                            fill:"transparent"});
+    z.addEventListener("mousemove", e => {
+      el(gh,"line",{x1:cx,x2:cx,y1:yc0,y2:yv1,stroke:"var(--axe)","stroke-width":1,
+                    class:"curseur"});
+      gh.querySelectorAll(".curseur").forEach((n,j,l)=>{ if(j<l.length-1) n.remove(); });
+      const v = volH.get(r.h)||0;
+      montreBulle(e, `<b>${r.h.replace("T"," ")} h</b><br>`+
+        `ouverture ${prix(r.o)} · cloture <b>${prix(r.c)}</b><br>`+
+        `haut ${prix(r.hi)} · bas ${prix(r.lo)}<br>`+
+        (v ? `${ent(v)} unites echangees` : '<span class="dim">aucune vente observee</span>')+
+        `<br><span class="dim">${r.n||0} releves de prix</span>`);
+    });
+    z.addEventListener("mouseleave", () => { cacheBulle();
+      gh.querySelectorAll(".curseur").forEach(n=>n.remove()); });
+  });
+
+  box.innerHTML=""; box.appendChild(s);
+  document.getElementById("l_bougies").innerHTML =
+    `<span><i style="background:var(--hausse)"></i>heure en hausse</span>`+
+    `<span><i style="background:var(--baisse)"></i>heure en baisse</span>`+
+    `<span class="dim">le volume est trace a part, sous les bougies</span>`;
+  const nRepli = px.filter(r=>r.replie).length;
+  document.getElementById("f_bougies").textContent =
+    `${px.length} heures · derniere bougie ${px.at(-1).h.replace("T"," ")} h, `+
+    `encore en construction.` +
+    (nRepli ? ` ${nRepli} bougie(s) reconstituee(s) a partir des carnets, faute `+
+              `de releve de prix a cette date (moins fin, mais continu).` : "") +
+    ` Le volume et le profil ne comptent que les qualites cochees.`;
+}
+/* ====================================================== le carnet, vivant = */
+function dessineCarnet(k){
+  const box = document.getElementById("c_carnet");
+  const off = ORDRES.filter(o => o.k===k && SELQ.has(o.q)).sort((a,b)=>a.p-b.p);
+  if(!off.length){ box.innerHTML='<div class="vide">Aucune offre sur les qualites choisies.</div>';
+    document.getElementById("f_carnet").textContent=""; return; }
+  const pts=[]; let c=0;
+  for(const o of off){ c += o.qt; pts.push({p:o.p, c}); }
+  const W=560,H=230,M={g:62,d:14,h:12,b:30};
+  const s=svg(W,H); s.setAttribute("aria-label","Profondeur du carnet");
+  const x0=M.g,x1=W-M.d,y0=M.h,y1=H-M.b;
+  const bx=bornes(pts[0].p, pts.at(-1).p, 5), by=bornes(0, c, 4);
+  const X=v=>x0+(v-bx.min)/(bx.max-bx.min)*(x1-x0);
+  const Y=v=>y1-v/by.max*(y1-y0);
+  ticksY(s,y0,y1,0,by.max,by.pas,x0,x1,v=>court(v));
+  el(s,"line",{x1:x0,x2:x1,y1:y1,y2:y1,class:"g-axe"});
+  for(let v=bx.min; v<=bx.max+bx.pas/1e6; v+=bx.pas)
+    el(s,"text",{x:X(v),y:y1+15,"text-anchor":"middle",class:"g-tick"},prix(v));
+  let d=`M ${X(pts[0].p)} ${y1}`;
+  pts.forEach(p=>{ d += ` L ${X(p.p)} ${Y(p.c)}`; });
+  d += ` L ${X(pts.at(-1).p)} ${y1} Z`;
+  el(s,"path",{d, fill:"var(--s1)", opacity:.13});
+  let l=`M ${X(pts[0].p)} ${Y(pts[0].c)}`;
+  pts.forEach(p=>{ l += ` L ${X(p.p)} ${Y(p.c)}`; });
+  el(s,"path",{d:l, fill:"none", stroke:"var(--s1)","stroke-width":2,
+               "stroke-linejoin":"round"});
+  const z=el(s,"rect",{x:x0,y:y0,width:x1-x0,height:y1-y0,fill:"transparent"});
+  z.addEventListener("mousemove",e=>{
+    const r=s.getBoundingClientRect();
+    const px=bx.min+((e.clientX-r.left)/r.width*W-x0)/(x1-x0)*(bx.max-bx.min);
+    let best=pts[0]; for(const p of pts) if(p.p<=px) best=p;
+    montreBulle(e,`Jusqu'a <b>${prix(best.p)} $</b><br>${ent(best.c)} unites disponibles<br>`+
+      `<span class="dim">${off.filter(o=>o.p<=best.p).length} offres</span>`);
+  });
+  z.addEventListener("mouseleave",cacheBulle);
+  box.innerHTML=""; box.appendChild(s);
+  document.getElementById("f_carnet").textContent =
+    `${off.length} offres · ${ent(c)} unites · le moins cher a ${prix(off[0].p)} $`;
+}
+
+/* ========================================= ce que le marche absorbe /jour = */
+function dessineAbsorption(k){
+  const box=document.getElementById("c_absorb"), d0=depuisMs();
+  const par=new Map();
+  for(const r of VOLUME){ if(!SELQ.has(r.q)||tsH(r.h)<d0) continue;
+    par.set(r.p,(par.get(r.p)||0)+r.v+r.d); }
+  const heures=new Set(); for(const q of SELQ)
+    for(const r of (HOR.get(k+"|"+q)||[])) if(tsH(r.h)>=d0) heures.add(r.h);
+  const jours=Math.max(heures.size/24, 1/24);
+  const P=[...par.entries()].sort((a,b)=>b[0]-a[0]);
+  if(!P.length){ box.innerHTML='<div class="vide">Aucune vente observee sur cette periode.</div>';
+    document.getElementById("f_absorb").textContent=""; return; }
+  let cum=0; const pts=P.map(([p,v])=>({p, j:(cum+=v)/jours})).reverse();
+  const W=560,H=230,M={g:62,d:14,h:12,b:30};
+  const s=svg(W,H); s.setAttribute("aria-label","Volume absorbe par jour selon le prix");
+  const x0=M.g,x1=W-M.d,y0=M.h,y1=H-M.b;
+  const jmax=Math.max(...pts.map(p=>p.j));
+  const bx=bornes(pts[0].p,pts.at(-1).p,5), by=bornes(0,jmax,4);
+  const X=v=>x0+(v-bx.min)/(bx.max-bx.min)*(x1-x0), Y=v=>y1-v/by.max*(y1-y0);
+  ticksY(s,y0,y1,0,by.max,by.pas,x0,x1,v=>court(v));
+  el(s,"line",{x1:x0,x2:x1,y1:y1,y2:y1,class:"g-axe"});
+  for(let v=bx.min;v<=bx.max+bx.pas/1e6;v+=bx.pas)
+    el(s,"text",{x:X(v),y:y1+15,"text-anchor":"middle",class:"g-tick"},prix(v));
+  let l=`M ${X(pts[0].p)} ${Y(pts[0].j)}`;
+  pts.forEach(p=>{ l+=` L ${X(p.p)} ${Y(p.j)}`; });
+  el(s,"path",{d:l,fill:"none",stroke:"var(--s2)","stroke-width":2,
+               "stroke-linejoin":"round"});
+  const z=el(s,"rect",{x:x0,y:y0,width:x1-x0,height:y1-y0,fill:"transparent"});
+  z.addEventListener("mousemove",e=>{
+    const r=s.getBoundingClientRect();
+    const px=bx.min+((e.clientX-r.left)/r.width*W-x0)/(x1-x0)*(bx.max-bx.min);
+    let best=pts[0],dd=1e18;
+    for(const p of pts){ const t=Math.abs(p.p-px); if(t<dd){dd=t;best=p;} }
+    const fr=1-(+document.getElementById("i_frais").value||0)/100;
+    const tr=+document.getElementById("i_tr").value||0;
+    montreBulle(e,`A <b>${prix(best.p)} $</b><br>${ent(best.j)} unites par jour<br>`+
+      `<span class="dim">soit ${court(best.j*(best.p*fr-tr))} $ net/jour</span>`);
+  });
+  z.addEventListener("mouseleave",cacheBulle);
+  box.innerHTML=""; box.appendChild(s);
+  document.getElementById("f_absorb").textContent =
+    `Sur ${heures.size} heures observees. Le net deduit les frais et le transport.`;
+}
+
+/* ============================================== cout de fabrication ======= */
+/* A REMPLIR quand tu auras les recettes. Forme attendue :
+     RECETTES[kind] = {temps: heures, entrees:[{kind, qte}], sortie: qte}
+   Toute la mecanique ci-dessous s'allume toute seule des qu'une entree
+   existe : cout des intrants au prix du marche, marge, marge par heure.   */
+const RECETTES = {};
+function rendMarge(k){
+  const carte=document.getElementById("carte_marge"), r=RECETTES[k];
+  if(!r){ carte.hidden=true; return; }
+  carte.hidden=false;
+  const px=e=>INSTANT.get(e.kind)?.p ?? null;
+  const l=r.entrees.map(e=>({...e, u:px(e), t:(px(e)||0)*e.qte}));
+  const cout=l.reduce((s,x)=>s+x.t,0)/(r.sortie||1);
+  const vente=INSTANT.get(k)?.p ?? null;
+  const fr=1-(+document.getElementById("i_frais").value||0)/100;
+  const net=vente!=null ? vente*fr : null;
+  const marge=net!=null ? net-cout : null;
+  document.getElementById("a_marge").innerHTML =
+    `Cout des intrants au prix du marche, contre le prix de vente net de frais. `+
+    `Marge unitaire <b class="${(marge||0)>=0?"up":"down"}">${prix(marge)} $</b>`+
+    (r.temps?` · <b>${prix((marge||0)*(r.sortie||1)/r.temps)} $/h</b> de machine`:"");
+  document.getElementById("t_marge").innerHTML =
+    "<thead><tr><th>Intrant</th><th>Quantite</th><th>Prix unitaire</th><th>Cout</th></tr></thead><tbody>"
+    + l.map(x=>`<tr><td>${nom(x.kind)}</td><td>${ent(x.qte)}</td>`+
+        `<td>${prix(x.u)} $</td><td>${prix(x.t)} $</td></tr>`).join("")
+    + `<tr><td colspan="3"><b>Cout par unite produite</b></td><td><b>${prix(cout)} $</b></td></tr>`
+    + `<tr><td colspan="3">Vente nette de frais</td><td>${prix(net)} $</td></tr></tbody>`;
+}
+
+/* ==================================================== tableau des heures == */
+function rendHeures(k){
+  const d0=depuisMs(), par=new Map();
+  for(const q of SELQ) for(const r of (HOR.get(k+"|"+q)||[])){
+    if(tsH(r.h)<d0) continue;
+    const a=par.get(r.h)||{h:r.h,vendu:0,disparu:0,repose:0,retire:0,pose:0,n:0,qte:0,prof:0};
+    a.vendu+=r.vendu; a.disparu+=r.disparu; a.repose+=r.repose; a.retire+=r.retire;
+    a.pose+=r.pose; a.n+=r.n||0; a.qte+=r.qte||0; a.prof+=r.prof||0;
+    par.set(r.h,a);
+  }
+  const px=new Map(bougies(k, d0).map(r=>[r.h,r]));
+  const L=[...par.values()].sort((a,b)=>a.h<b.h?1:-1).slice(0,48);
+  document.getElementById("t_heures").innerHTML =
+    "<thead><tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th>"+
+    "<th>Cloture</th><th>Offres</th><th>Vendu</th><th>Repositionne</th>"+
+    "<th>Retire</th><th>Pose</th><th>Profondeur -5 %</th></tr></thead><tbody>"
+    + (L.length ? L.map(d=>{
+        const p=px.get(d.h)||{}, v=d.vendu+d.disparu;
+        const info=v?` title="${ent(d.vendu)} u mesurees, ${ent(d.disparu)} u deduites"`:"";
+        return `<tr><td>${d.h.replace("T"," ")} h</td><td>${prix(p.o)}</td>`+
+          `<td>${prix(p.hi)}</td><td>${prix(p.lo)}</td><td>${prix(p.c)}</td>`+
+          `<td>${d.n||'<span class="dim">—</span>'}</td>`+
+          `<td${info}>${v?ent(v):'<span class="dim">—</span>'}</td>`+
+          `<td>${d.repose?ent(d.repose):'<span class="dim">—</span>'}</td>`+
+          `<td>${d.retire?ent(d.retire):'<span class="dim">—</span>'}</td>`+
+          `<td>${d.pose?ent(d.pose):'<span class="dim">—</span>'}</td>`+
+          `<td>${d.prof?ent(d.prof):'<span class="dim">—</span>'}</td></tr>`;
+      }).join("") : '<tr><td colspan="11" class="dim">Rien a afficher.</td></tr>')
+    + "</tbody>";
+}
+
+/* ======================================================= vue produit ====== */
+async function rendProduit(){
+  const k=KIND; if(k==null) return;
+  await chargerVolume(k);
+  const r=resumeProduit(k);
+  const vieux = r.carnet.length
+    ? Date.now()-new Date(r.carnet.reduce((m,o)=>o.passage>m?o.passage:m,"")).getTime() : null;
+  document.getElementById("t_produit").innerHTML =
+    tuile("Meilleur prix", prix(r.meilleur)+" $",
+          vieux!=null ? "carnet lu "+(duree(vieux)==="a l'instant"?"a l'instant":"il y a "+duree(vieux)) : "") +
+    tuile("Variation", r.varp==null?"—":(r.varp>=0?"+":"")+fmt(r.varp,2)+" %",
+          "sur "+(HEURES?HEURES+" h":"tout l'historique"), r.varp>=0?"up":"down") +
+    tuile("Volume echange", court(r.vol), court(r.val)+" $ de valeur") +
+    tuile("Profondeur a -5 %", court(r.prof), r.offres+" offres, "+court(r.qte)+" u en vente");
+  dessineBougies(k); dessineCarnet(k); dessineAbsorption(k);
+  rendMarge(k); rendHeures(k);
+}
+
+/* ================================================== qualites et navigation */
+function majQualites(){
+  const k=KIND;
+  QUALITES=[...new Set([...ORDRES.filter(o=>o.k===k).map(o=>o.q),
+    ...[...HOR.keys()].filter(c=>+c.split("|")[0]===k).map(c=>+c.split("|")[1])])]
+    .sort((a,b)=>a-b);
+  if(!QUALITES.length) QUALITES=[0];
+  const garde=new Set([...SELQ].filter(q=>QUALITES.includes(q)));
+  SELQ = garde.size ? garde : new Set(QUALITES);      // tout coche par defaut
+  const box=document.getElementById("qual");
+  box.innerHTML = `<span class="puce${SELQ.size===QUALITES.length?" on":""}" data-tout="1">toutes</span>`
+    + QUALITES.map(q=>`<span class="puce${SELQ.has(q)?" on":""}" data-q="${q}">`+
+        (q===0?"0":q+"★")+"</span>").join("");
+  box.querySelectorAll("[data-q]").forEach(p=>p.onclick=()=>{
+    const q=+p.dataset.q;
+    if(SELQ.has(q)) SELQ.delete(q); else SELQ.add(q);
+    if(!SELQ.size) SELQ.add(q);
+    majQualites(); rendProduit();
+  });
+  box.querySelector("[data-tout]").onclick=()=>{
+    SELQ = SELQ.size===QUALITES.length ? new Set([QUALITES[0]]) : new Set(QUALITES);
+    majQualites(); rendProduit();
   };
-  const N = 160, courbe = [];
-  for (let i = 0; i < N; i++) {
-    const p = x0 + i / (N - 1) * (x1 - x0);
-    courbe.push({p, q: absorbe(p)});
-  }
-
-  const frais = +document.getElementById("i_frais").value / 100;
-  const ptr = +document.getElementById("i_tr").value;
-  const tru = +document.getElementById("i_tru").value;
-  const prod = +document.getElementById("i_prod").value || 0;
-  const netC = p => p - ptr * tru * 0.5;
-  const netB = p => p * (1 - frais) - ptr * tru;
-
-  const tient = courbe.filter(x => x.q >= prod);
-  const prixTout = prod > 0 && tient.length ? tient[tient.length - 1].p : null;
-  const rev = courbe.map(x => ({p: x.p, r: (prod ? Math.min(x.q, prod) : x.q) * netC(x.p)}));
-  const best = rev.reduce((a, b) => b.r > a.r ? b : a);
-  const meilleur = carnet.length ? carnet[0].p : null;
-
-  document.getElementById("n_dem").innerHTML =
-    (prod <= 0
-      ? "Renseigne <b>ta production</b> ci-dessus pour savoir jusqu'ou tu peux " +
-        "monter le prix en ecoulant tout. Sans elle, le calcul suppose que tu " +
-        "peux fournir tout ce que le marche demande."
-      : prixTout
-        ? "Le prix le plus haut auquel <b>tes " + ent(prod) + " u/jour partent</b> : <b>" +
-          prix(prixTout) + " $</b>."
-        : "<b>La bourse n'absorbe pas " + ent(prod) + " u/jour</b> : meme au prix le " +
-          "plus bas de la periode elle n'en prend que " + ent(courbe[0].q) + " u/jour.") +
-    " Le prix qui <b>rapporte le plus</b> : <b>" + prix(best.p) + " $</b>, soit " +
-    ent(best.r) + " $/jour nets en contrat (prix moins " +
-    fmt(ptr * tru * 0.5, 4) + " $ de transport) — " + ent(best.r / netC(best.p)) +
-    " u/jour a " + prix(best.p) + " $." +
-    (meilleur ? " Le marche est actuellement a <b>" + prix(meilleur) + " $</b>, " +
-      "soit " + fmt(netC(meilleur), 4) + " $ nets en contrat et " +
-      fmt(netB(meilleur), 4) + " $ en bourse." : "") +
-    (observees < 24 ? ' <span class="dim">Moins d\'une journee de recul : ces ' +
-      "chiffres bougeront encore beaucoup.</span>" : "");
-
-  courbeXY(elD, "dem", courbe, x => x.p, x => x.q, prix, ent,
-    "u/jour absorbees", prod || null, "ta production",
-    i => "A <b>" + prix(courbe[i].p) + " $</b><br>la bourse prend <b>" +
-         ent(courbe[i].q) + " u/jour</b>", null, x0, x1);
-  courbeXY(elR, "rev", rev, x => x.p, x => x.r, prix, ent,
-    "$/jour nets", null, null,
-    i => "A <b>" + prix(rev[i].p) + " $</b><br><b>" + ent(rev[i].r) + " $/jour</b> nets",
-    best, x0, x1);
 }
-
-// Une courbe sur une echelle de prix reelle (pas un simple rang).
-function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, info,
-                  marque, bx0, bx1) {
-  const lh = 200, lw = W - M.l - M.r;
-  const xs = pts.map(fx), ys = pts.map(fy);
-  const x0 = bx0 != null ? bx0 : Math.min(...xs);
-  const x1 = bx1 != null ? bx1 : Math.max(...xs);
-  const ymax = Math.max(...ys, seuil || 0);
-  const y = echelle(0, ymax, lh);
-  const X = v => x1 === x0 ? lw / 2 : (v - x0) / (x1 - x0) * lw;
-
-  const trait = '<polyline points="' + pts.map(d =>
-    X(fx(d)).toFixed(1) + "," + y(fy(d)).toFixed(1)).join(" ") +
-    '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>';
-  const aire = '<polygon points="' + X(x0).toFixed(1) + "," + y(0).toFixed(1) + " " +
-    pts.map(d => X(fx(d)).toFixed(1) + "," + y(fy(d)).toFixed(1)).join(" ") + " " +
-    X(x1).toFixed(1) + "," + y(0).toFixed(1) + '" fill="var(--band)"/>';
-
-  let deco = "";
-  if (seuil) {
-    deco += '<line x1="0" y1="' + y(seuil).toFixed(1) + '" x2="' + lw + '" y2="' +
-      y(seuil).toFixed(1) + '" stroke="var(--s2)" stroke-width="2" ' +
-      'stroke-dasharray="0"/><text class="lbl" x="4" y="' +
-      (y(seuil) - 7).toFixed(1) + '" fill="var(--s2)">' + nomSeuil + " : " +
-      fmtY(seuil) + '</text>';
-  }
-  if (marque) {
-    deco += '<line x1="' + X(fx(marque)).toFixed(1) + '" y1="0" x2="' +
-      X(fx(marque)).toFixed(1) + '" y2="' + lh + '" stroke="var(--s2)" stroke-width="2"/>' +
-      '<text class="lbl" text-anchor="middle" x="' + X(fx(marque)).toFixed(1) +
-      '" y="-2" fill="var(--s2)">' + fmtX(fx(marque)) + " $</text>";
-  }
-
-  const n = Math.min(8, pts.length), ax = [];
-  for (let j = 0; j < n; j++) {
-    const v = x0 + j / (n - 1 || 1) * (x1 - x0);
-    ax.push('<text class="tk m" x="' + X(v).toFixed(1) + '" y="' + (lh + 17) + '">' +
-      fmtX(v) + "</text>");
-  }
-
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, ymax, 4), y, 0, lw) + aire + trait + deco +
-    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
-    ax.join("") +
-    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) + '">ton prix de vente ($) — ' +
-    titreY + '</text>' +
-    '<line id="cr_' + cle + '" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
-    '" fill="transparent" id="hit_' + cle + '"/></g>', lh + M.t + M.b + 18);
-
-  survol(el, cle, pts, lw, info);
+function ouvreProduit(k){
+  KIND=k; document.getElementById("res").value=String(k);
+  basculer("produit");
 }
-
-/* --- LE graphique : le volume echange a chaque prix --- */
-function volumeParPrix(pts, total, x0, x1) {
-  const el = document.getElementById("c_vol");
-  document.getElementById("h_vol").textContent = pts.length
-    ? ent(total) + " unites ont change de mains sur la periode" +
-      ". Chaque barre est posee a son prix reel : les trous sont des prix ou " +
-      "rien ne s'est echange."
-    : "Aucune vente enregistree sur cette periode pour les qualites cochees.";
-  if (!pts.length || x1 <= x0) { el.innerHTML = vide("Pas encore de vente observee."); return; }
-
-  const lh = 180, lw = W - M.l - M.r;
-  const max = Math.max(...pts.map(x => x.v));
-  const y = echelle(0, max, lh);
-  const X = v => (v - x0) / (x1 - x0) * lw;
-  // largeur : l'ecart le plus serre entre deux paliers, plafonne
-  let ecart = lw;
-  for (let i = 1; i < pts.length; i++) ecart = Math.min(ecart, X(pts[i].p) - X(pts[i - 1].p));
-  const large = Math.max(3, Math.min(ecart - 3, 46, lw / 6));
-  const gros = pts.reduce((a, b) => b.v > a.v ? b : a);
-
-  const n = Math.min(8, 200), ax = [];
-  for (let j = 0; j < 8; j++) {
-    const v = x0 + j / 7 * (x1 - x0);
-    ax.push('<text class="tk m" x="' + X(v).toFixed(1) + '" y="' + (lh + 17) + '">' +
-      prix(v) + '</text>');
-  }
-
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, max, 4), y, 0, lw) +
-    pts.map(d => '<rect x="' + (X(d.p) - large / 2).toFixed(1) + '" y="' +
-      y(d.v).toFixed(1) + '" width="' + large.toFixed(1) + '" height="' +
-      Math.max(y(0) - y(d.v), 1).toFixed(1) + '" rx="2" fill="var(--s1)" opacity="' +
-      (d === gros ? "1" : ".82") + '"/>').join("") +
-    '<text class="lbl" text-anchor="middle" x="' + X(gros.p).toFixed(1) +
-    '" y="' + (y(gros.v) - 8).toFixed(1) + '">' + ent(gros.v) + " u a " +
-    prix(gros.p) + ' $</text>' +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw + '" y2="' +
-    y(0).toFixed(1) + '"/>' + ax.join("") +
-    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 32) +
-    '">prix auquel la vente s\'est faite ($)</text>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
-    '" fill="transparent" id="hit_vol"/></g>', lh + M.t + M.b + 16);
-
-  const posX = pts.map(d => X(d.p));
-  const hit = el.querySelector("#hit_vol"), tip = document.getElementById("t_vol");
-  hit.addEventListener("mousemove", e => {
-    const r = hit.getBoundingClientRect();
-    const px = (e.clientX - r.left) / r.width * lw;
-    let best = 0;
-    posX.forEach((v, i) => { if (Math.abs(v - px) < Math.abs(posX[best] - px)) best = i; });
-    tip.innerHTML = "<b>" + ent(pts[best].v) + " u</b> a " + prix(pts[best].p) +
-      ' $<br><span class="dim">' + fmt(pts[best].v / total * 100, 1) + " % du volume</span>";
-    tip.style.opacity = "1";
-    const c = el.parentElement.getBoundingClientRect();
-    tip.style.left = Math.min(c.width - 180, Math.max(8, e.clientX - c.left + 12)) + "px";
-    tip.style.top = (e.clientY - c.top - 6) + "px";
-  });
-  hit.addEventListener("mouseleave", () => tip.style.opacity = "0");
+function basculer(v){
+  VUE=v;
+  document.getElementById("o_marche").setAttribute("aria-selected", v==="marche");
+  document.getElementById("o_produit").setAttribute("aria-selected", v==="produit");
+  document.getElementById("v_marche").hidden = v!=="marche";
+  document.getElementById("v_produit").hidden = v!=="produit";
+  for(const id of ["c_res","c_qual","c_frais","c_tr"])
+    document.getElementById(id).hidden = v!=="produit";
+  if(v==="produit"){ majQualites(); rendProduit(); } else rendMarche();
+  scrollTo({top:0, behavior:"smooth"});
 }
+/* ========================================================= la veille ======
+   L'API rend le SHA du dernier commit de `live` ; ce SHA sert d'adresse aux
+   fichiers, et une adresse par SHA est immuable — le cache ne peut pas
+   mentir. 60 appels/heure sans jeton, d'ou une verification toutes les 70 s
+   qui se ralentit toute seule quand la reserve baisse.                     */
+const POLL=70000;
+let PROCHAIN=Date.now()+POLL, EN_COURS=false, SOUCI=null;
+function bandeau(){
+  const e=document.getElementById("fil");
+  const age=MAJ?Math.round((Date.now()-MAJ)/1000):null;
+  const dans=Math.max(0,Math.round((PROCHAIN-Date.now())/1000));
+  let t,c="";
+  if(EN_COURS){ t="mise a jour..."; c="charge"; }
+  else if(SOUCI){ t=SOUCI; c="casse"; }
+  else if(age==null){ t="premier chargement..."; c="charge"; }
+  else{
+    t="a jour depuis "+(age<60?age+" s":Math.floor(age/60)+" min "+(age%60)+" s")
+      +" · verification dans "+dans+" s";
+    if(age>300) c="vieux";
+  }
+  if(QUOTA!=null && QUOTA<10) t+=" · reserve API basse ("+QUOTA+")";
+  e.className="fil "+c; e.innerHTML='<span class="pouls"></span>'+t;
+}
+setInterval(bandeau,1000);
 
-/* --- prix : une courbe si une seule qualite, une par qualite sinon --- */
-function courbePrix(k, qs, depuis, fus) {
-  const el = document.getElementById("c_prix");
-  const p = fus.filter(x => x.c != null);
-  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de releves."); return; }
+async function shaLive(){
+  try{
+    const r=await fetch(API_REF,{cache:"no-store",
+      headers:{"Accept":"application/vnd.github.sha"}});
+    const q=r.headers.get("x-ratelimit-remaining"); if(q!=null) QUOTA=+q;
+    if(r.status===403||r.status===429){
+      SOUCI="reserve API epuisee — lecture de secours, jusqu'a 5 min de retard";
+      return null; }
+    if(!r.ok){ SOUCI="GitHub repond "+r.status; return null; }
+    SOUCI=null; return (await r.text()).trim();
+  }catch(e){ SOUCI="reseau injoignable"; return null; }
+}
+const cadence=()=> QUOTA==null?POLL : QUOTA<5?600000 : QUOTA<15?180000 : POLL;
 
-  const lw = W - M.l - M.r, lh = H - M.t - M.b;
-  const multi = qs.length > 1;
-  document.getElementById("h_prix").textContent = multi
-    ? "Une courbe par niveau de qualite : le meilleur prix en vente, heure par heure."
-    : "Trait plein : prix de cloture. Zone claire : ecart entre le plus haut et le " +
-      "plus bas de l'heure.";
-  const gardees = qs.slice(0, 8);
-  const axeH = p.map(x => x.h);
-  const rang = new Map(axeH.map((h, i) => [h, i]));
-
-  const series = multi ? gardees.map((q, i) => {
-    const tab = new Array(axeH.length).fill(null);
-    for (const x of serieQ(k, q)) {
-      if (x.c == null || !rang.has(x.h)) continue;
-      tab[rang.get(x.h)] = x.c;
+async function veille(amorce){
+  if(EN_COURS) return;
+  const sha=await shaLive();
+  PROCHAIN=Date.now()+cadence();
+  if(sha && sha===SHA && !amorce){ bandeau(); return; }
+  if(sha) SHA=sha;
+  else if(!amorce && MAJ && Date.now()-MAJ < 300000){ bandeau(); return; }
+  EN_COURS=true; bandeau();
+  document.querySelector(".wrap").classList.add("chargement");
+  try{
+    const e=await charge(L("etat.json"));
+    if(e){ try{ ETAT=JSON.parse(e); }catch(_){} }
+    VOL_KIND=null;                       // le carnet a change : volumes perimes
+    if(await chargerTout()){
+      MAJ=Date.now();
+      majSelecteur();
+      if(VUE==="produit"){ majQualites(); await rendProduit(); } else rendMarche();
+      majSousTitre();
     }
-    return {q, i, tab, n: tab.filter(v => v != null).length};
-  }).filter(s => s.n > 1) : [];
-
-  const vals = multi ? series.flatMap(s => s.tab.filter(v => v != null))
-                     : p.flatMap(x => [x.hi ?? x.c, x.lo ?? x.c]);
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const y = echelle(min, max, lh), x = i => i / (p.length - 1) * lw;
-
-  let corps = "";
-  if (multi) {
-    corps = series.map(s => {
-      const bouts = [];
-      let cour = [];
-      s.tab.forEach((v, i) => {
-        if (v == null) { if (cour.length > 1) bouts.push(cour); cour = []; }
-        else cour.push(x(i).toFixed(1) + "," + y(v).toFixed(1));
-      });
-      if (cour.length > 1) bouts.push(cour);
-      return bouts.map(b => '<polyline points="' + b.join(" ") +
-        '" fill="none" stroke="' + COUL(s.i) +
-        '" stroke-width="2" stroke-linejoin="round"/>').join("");
-    }).join("");
-  } else {
-    corps = '<polygon points="' +
-      p.map((d, i) => x(i).toFixed(1) + "," + y(d.hi ?? d.c).toFixed(1))
-       .concat(p.map((d, i) => x(i).toFixed(1) + "," + y(d.lo ?? d.c).toFixed(1)).reverse())
-       .join(" ") + '" fill="var(--band)"/>' +
-      '<polyline points="' + p.map((d, i) => x(i).toFixed(1) + "," + y(d.c).toFixed(1))
-        .join(" ") + '" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round"/>' +
-      '<circle cx="' + x(p.length - 1).toFixed(1) + '" cy="' + y(p[p.length - 1].c).toFixed(1) +
-      '" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>' +
-      '<text class="lbl" x="' + (x(p.length - 1) + 9).toFixed(1) + '" y="' +
-      (y(p[p.length - 1].c) + 4).toFixed(1) + '">' + prix(p[p.length - 1].c) + ' $</text>';
-  }
-
-  const legende = multi ? '<div class="leg">' + series.map(s =>
-    '<span><i style="background:' + COUL(s.i) + '"></i>' +
-    (s.q === 0 ? "0 etoile" : s.q + " \u2605") + '</span>').join("") +
-    (qs.length > 8 ? '<span class="dim">(les ' + (qs.length - 8) +
-      ' qualites les plus hautes ne sont pas tracees)</span>' : "") + '</div>' : "";
-
-  el.innerHTML = legende + svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 4), y, null, lw) + corps +
-    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
-    axeTemps(p, x, lh) +
-    '<line id="cr_prix" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
-    '" fill="transparent" id="hit_prix"/></g>');
-
-  survol(el, "prix", p, lw, i => p[i].h.replace("T", " a ") + " h<br><b>" +
-    prix(p[i].c) + " $</b>" +
-    (p[i].hi != null && !multi ? '<br><span class="dim">haut ' + prix(p[i].hi) +
-      " · bas " + prix(p[i].lo) + "</span>" : "") +
-    ((p[i].vendu + (p[i].disparu || 0)) ? "<br>" +
-       ent(p[i].vendu + (p[i].disparu || 0)) + " u vendues" : ""));
-}
-
-function courbeProfondeur(pts) {
-  const el = document.getElementById("c_prof");
-  const p = pts.filter(x => x.prof != null);
-  if (p.length < 2) { el.innerHTML = vide("Pas encore assez de releves de carnet."); return; }
-  const lh = 180, lw = W - M.l - M.r;
-  const max = Math.max(...p.map(d => d.prof));
-  const y = echelle(0, max, lh), x = i => i / (p.length - 1) * lw;
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, max, 3), y, 0, lw) +
-    '<polygon points="0,' + y(0).toFixed(1) + " " +
-    p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1)).join(" ") +
-    " " + lw + "," + y(0).toFixed(1) + '" fill="var(--band)"/>' +
-    '<polyline points="' + p.map((d, i) => x(i).toFixed(1) + "," + y(d.prof).toFixed(1))
-      .join(" ") + '" fill="none" stroke="var(--s1)" stroke-width="2"/>' +
-    '<line class="ax" x1="0" y1="' + lh + '" x2="' + lw + '" y2="' + lh + '"/>' +
-    axeTemps(p, x, lh) +
-    '<line id="cr_prof" class="ax" x1="0" y1="0" x2="0" y2="' + lh + '" opacity="0"/>' +
-    '<rect x="0" y="0" width="' + lw + '" height="' + lh +
-    '" fill="transparent" id="hit_prof"/></g>', lh + M.t + M.b);
-  survol(el, "prof", p, lw, i => p[i].h.replace("T", " a ") + " h<br><b>" +
-    ent(p[i].prof) + " u</b> a moins de 5 %");
-}
-
-function profilHoraire(tous) {
-  const el = document.getElementById("c_heure");
-  const parJour = new Map();
-  for (const p of tous) {
-    if (p.c == null) continue;
-    const j = p.h.slice(0, 10);
-    if (!parJour.has(j)) parJour.set(j, []);
-    parJour.get(j).push(p);
-  }
-  const acc = Array.from({length: 24}, () => []);
-  let nJours = 0;
-  for (const [, l] of parJour) {
-    if (l.length < 6) continue;          // journee trop incomplete
-    nJours++;
-    const moy = l.reduce((s, p) => s + p.c, 0) / l.length;
-    for (const p of l) acc[+p.h.slice(11, 13)].push((p.c / moy - 1) * 100);
-  }
-  const med = acc.map(a => a.length ? a.slice().sort((x, y) => x - y)[a.length >> 1] : null);
-  const dispo = med.filter(v => v != null);
-
-  document.getElementById("h_heure").textContent = nJours < 3
-    ? "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC). " +
-      "Base sur " + nJours + " journee(s) : trop peu pour en tirer une regle."
-    : "Ecart median du prix par rapport a la moyenne du jour, heure par heure (UTC), " +
-      "sur " + nJours + " journees completes. Au-dessus de zero : le prix y est " +
-      "habituellement plus haut. Calcule sur tout l'historique, pas sur la periode choisie.";
-  if (dispo.length < 4) { el.innerHTML = vide("Pas encore assez d'heures couvertes."); return; }
-
-  const lh = 190, lw = W - M.l - M.r;
-  const max = Math.max(...dispo, 0.5), min = Math.min(...dispo, -0.5);
-  const y = echelle(min, max, lh), bw = lw / 24;
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(min, max, 4), y, 2, lw) +
-    med.map((v, h) => v == null ? "" :
-      '<rect x="' + (h * bw + 2).toFixed(1) + '" y="' + Math.min(y(0), y(v)).toFixed(1) +
-      '" width="' + (bw - 4).toFixed(1) + '" height="' +
-      Math.max(Math.abs(y(v) - y(0)), 1.5).toFixed(1) + '" rx="3" fill="' +
-      (v >= 0 ? "var(--s1)" : "var(--s2)") + '"/>').join("") +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
-    '" y2="' + y(0).toFixed(1) + '"/>' +
-    med.map((v, h) => h % 3 === 0 ? '<text class="tk m" x="' +
-      (h * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) + '">' +
-      String(h).padStart(2, "0") + "</text>" : "").join("") +
-    '<text class="tk m" x="' + (lw / 2) + '" y="' + (lh + 30) + '">heure UTC</text>' +
-    '</g>', lh + M.t + M.b + 14);
-}
-
-function echelleQualite(k) {
-  const el = document.getElementById("c_qual");
-  const par = new Map();
-  for (const o of ORDRES) {
-    if (o.k != k) continue;
-    if (!par.has(o.q) || o.p < par.get(o.q).p) par.set(o.q, o);
-  }
-  const l = [...par.entries()].map(([q, o]) => ({q, p: o.p})).sort((a, b) => a.q - b.q);
-  if (l.length < 2) { el.innerHTML = vide("Une seule qualite en vente actuellement."); return; }
-  const lh = 180, lw = W - M.l - M.r;
-  const max = Math.max(...l.map(x => x.p));
-  const y = echelle(0, max, lh), bw = lw / l.length;
-  const base = l.find(x => x.q === 0);
-  el.innerHTML = svg('<g transform="translate(' + M.l + ',' + M.t + ')">' +
-    grille(ticks(0, max, 3), y, null, lw) +
-    l.map((d, i) => {
-      const ec = base ? (d.p / base.p - 1) * 100 : null;
-      return '<rect x="' + (i * bw + 3).toFixed(1) + '" y="' + y(d.p).toFixed(1) +
-        '" width="' + (bw - 6).toFixed(1) + '" height="' + (y(0) - y(d.p)).toFixed(1) +
-        '" rx="4" fill="var(--s1)"/><text class="lbl" text-anchor="middle" x="' +
-        (i * bw + bw / 2).toFixed(1) + '" y="' + (y(d.p) - 7).toFixed(1) + '">' +
-        prix(d.p) + '</text>' +
-        (ec && Math.abs(ec) > 0.5 ? '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) +
-          '" y="' + (y(d.p) - 21).toFixed(1) + '">' + (ec > 0 ? "+" : "") +
-          fmt(ec, 0) + ' %</text>' : "") +
-        '<text class="tk m" x="' + (i * bw + bw / 2).toFixed(1) + '" y="' + (lh + 16) +
-        '">' + d.q + (d.q === 0 ? "" : "★") + '</text>';
-    }).join("") +
-    '<line class="ax" x1="0" y1="' + y(0).toFixed(1) + '" x2="' + lw +
-    '" y2="' + y(0).toFixed(1) + '"/></g>', lh + M.t + M.b + 6);
-}
-
-function tableCarnet(carnet) {
-  const t = document.getElementById("t_carnet");
-  // une offre non revue depuis longtemps signale une ressource que le jeu ne
-  // nous laisse plus lire : mieux vaut le dire que d'afficher un carnet perime
-  const vu = vuLe(carnet);
-  const retard = vu ? Date.now() - new Date(vu).getTime() : 0;
-  document.getElementById("h_carnet").innerHTML = !carnet.length
-    ? "Aucune offre en vente pour ce niveau de qualite."
-    : carnet.length + " offres, relevees <b>il y a " + duree(retard) + "</b>. " +
-      "La colonne variation montre ce qui est parti depuis le passage precedent." +
-      (retard > 8 * 60000
-        ? ' <span class="err">Le tour de piste n\'est pas repasse sur cette ' +
-          "ressource depuis " + duree(retard) + " : des offres moins cheres ont " +
-          "pu apparaitre entre-temps. Verifie dans le jeu avant de te placer.</span>"
-        : "");
-  const l = carnet.slice(0, 15);
-  t.innerHTML = '<tr><th>Prix</th><th>Qualite</th><th>Quantite</th><th>Variation</th>' +
-    '<th>Vendeur</th><th>En vente depuis</th></tr>' +
-    (l.length ? l.map(o => {
-      return '<tr><td>' + prix(o.p) + ' $</td><td>' +
-        (o.q === 0 ? "0" : o.q + "\u2605") + '</td><td>' + ent(o.qt) + '</td><td>' +
-        (o.d ? '<span class="down">' + ent(o.d) + "</span>" : '<span class="dim">—</span>') +
-        '</td><td class="dim">' + o.sid + '</td><td>' +
-        duree(Date.now() - new Date(o.depuis).getTime()) + '</td></tr>';
-    }).join("") : '<tr><td colspan="6" class="dim">Rien a afficher.</td></tr>');
-}
-
-function netVente(carnet, pts) {
-  const der = [...pts].reverse().find(p => p.c != null);
-  const P = carnet.length ? carnet[0].p : (der && der.c);
-  const tb = document.getElementById("t_net"), nt = document.getElementById("n_net");
-  if (!P) { tb.innerHTML = ""; nt.textContent = "Pas de prix disponible."; return; }
-  const frais = +document.getElementById("i_frais").value / 100;
-  const ptr = +document.getElementById("i_tr").value;
-  const tru = +document.getElementById("i_tru").value;
-  const qte = +document.getElementById("i_qte").value || 0;
-  const netB = P * (1 - frais) - ptr * tru;
-  const netC = P - ptr * tru * 0.5;
-  const l = (t, n, d) => '<tr><td>' + t + '</td><td>' + fmt(n, 4) + ' $</td><td>' +
-    fmt(n / P * 100, 1) + ' %</td><td>' + ent(n * qte) + ' $</td><td class="dim">' +
-    d + '</td></tr>';
-  tb.innerHTML = '<tr><th>Canal</th><th>Net par unite</th><th>Part du prix</th><th>Sur ' +
-    ent(qte) + ' u</th><th>Detail</th></tr>' +
-    l("Contrat direct", netC, "prix &minus; " + fmt(ptr * tru * 0.5, 4) + " de transport") +
-    l("Bourse", netB, fmt(frais * 100, 1) + " % de frais + " + fmt(ptr * tru, 4) + " de transport");
-  nt.innerHTML = "Au prix actuel de <b>" + prix(P) + " $</b>, le contrat rapporte <b>" +
-    fmt(netC - netB, 4) + " $ de plus par unite</b> qu'une vente en bourse, soit <b>" +
-    ent((netC - netB) * qte) + " $</b> sur " + ent(qte) + " unites. " +
-    "Tu peux donc vendre en contrat jusqu'a <b>" + prix(netB + ptr * tru * 0.5) +
-    " $</b> — soit " + fmt((netB + ptr * tru * 0.5) / P * 100 - 100, 2) +
-    " % sous le marche — et encaisser autant qu'en bourse au prix affiche.";
-}
-
-function tableau(pts) {
-  const p = pts.slice(-24).reverse();
-  document.getElementById("t_tab").innerHTML =
-    '<tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th><th>Cloture</th>' +
-    '<th>Offres</th><th>Vendu</th><th>Repositionne</th><th>Retire</th>' +
-    '<th>Profondeur -5 %</th></tr>' +
-    (p.length ? p.map(d => {
-      // vendu + disparu : la mesure et la deduction decrivent le meme fait,
-      // une vente. Le detail reste au survol, pour qui veut la nuance.
-      const v = (d.vendu || 0) + (d.disparu || 0);
-      const info = v ? ' title="' + ent(d.vendu || 0) + " u mesurees, " +
-                       ent(d.disparu || 0) + ' u deduites"' : "";
-      return '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" +
-      prix(d.o) + "</td><td>" + prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" +
-      prix(d.c) + "</td><td>" + (d.n ?? "—") + "</td><td" + info + ">" +
-      (v ? ent(v) : '<span class="dim">—</span>') + "</td><td>" +
-      (d.repose ? ent(d.repose) : '<span class="dim">—</span>') + "</td><td>" +
-      (d.retire ? ent(d.retire) : '<span class="dim">—</span>') + "</td><td>" +
-      (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') +
-      "</td></tr>"; }).join("") :
-      '<tr><td colspan="10" class="dim">Rien a afficher.</td></tr>');
-}
-
-/* ---------- la veille ----------------------------------------------
-   On ne peut pas demander "quoi de neuf ?" a raw.githubusercontent : il
-   repond avec cinq minutes de retard. On le demande donc a l'API, qui rend
-   le SHA du dernier commit de `live`. Ce SHA sert ensuite d'adresse : elle
-   est immuable, donc toujours exacte.
-
-   L'API sans jeton donne 60 appels par heure et par adresse IP. Une
-   verification par minute tient donc pile dans le budget — et le code se
-   ralentit tout seul si la reserve baisse, pour ne jamais tomber a sec. */
-// 60 s donnerait 60 appels/heure : exactement le budget, donc aucune marge
-// pour un rechargement manuel ou un second onglet. 70 s en laisse une.
-const POLL = 70000;
-let PROCHAIN = Date.now() + POLL;   // pour le compte a rebours
-let MAJ = null;               // instant du dernier rafraichissement reussi
-let EN_COURS = false;
-let SOUCI = null;             // message a afficher si quelque chose cloche
-
-function bandeau() {
-  const el = document.getElementById("frais");
-  if (!el) return;
-  const age = MAJ ? Math.round((Date.now() - MAJ) / 1000) : null;
-  const dans = Math.max(0, Math.round((PROCHAIN - Date.now()) / 1000));
-  let txt, classe = "";
-  if (EN_COURS) { txt = "mise a jour en cours..."; classe = "charge"; }
-  else if (SOUCI) { txt = SOUCI; classe = "casse"; }
-  else if (age === null) { txt = "premier chargement..."; classe = "charge"; }
-  else {
-    txt = "a jour depuis " + (age < 60 ? age + " s"
-        : Math.floor(age / 60) + " min " + (age % 60) + " s")
-        + " · prochaine verification dans " + dans + " s";
-    if (age > 240) classe = "vieux";           // 4 min sans rien : anormal
-  }
-  if (QUOTA != null && QUOTA < 10)
-    txt += " · reserve API basse (" + QUOTA + "), cadence ralentie";
-  el.className = "sub " + classe;
-  el.innerHTML = '<span class="pouls"></span>' + txt;
-}
-setInterval(bandeau, 1000);   // le compte a rebours bouge chaque seconde
-
-async function shaLive() {
-  try {
-    const r = await fetch(API_REF, {cache: "no-store",
-      headers: {"Accept": "application/vnd.github.sha"}});   // reponse = le SHA nu
-    const q = r.headers.get("x-ratelimit-remaining");
-    if (q != null) QUOTA = +q;
-    if (r.status === 403 || r.status === 429) {
-      SOUCI = "reserve API epuisee — lecture de secours, jusqu'a 5 min de retard";
-      return null;
-    }
-    if (!r.ok) { SOUCI = "GitHub repond " + r.status; return null; }
-    SOUCI = null;
-    return (await r.text()).trim();
-  } catch (e) {
-    SOUCI = "reseau injoignable";
-    return null;
+  } finally {
+    EN_COURS=false;
+    document.querySelector(".wrap").classList.remove("chargement");
+    bandeau();
   }
 }
 
-// La cadence s'adapte a ce qu'il reste : on ne veut jamais epuiser le
-// budget, sinon la page devient aveugle jusqu'a la prochaine heure ronde.
-function cadence() {
-  if (QUOTA == null) return POLL;
-  if (QUOTA < 5) return 10 * 60000;
-  if (QUOTA < 15) return 3 * 60000;
-  return POLL;
+function majSousTitre(){
+  const n=ORDRES.length, k=KINDS.length;
+  const h=new Set(); for(const v of HOR.values()) for(const r of v) h.add(r.h);
+  document.getElementById("sous").textContent =
+    `${ent(n)} offres en vente sur ${k} ressources · ${h.size} heures de marche `+
+    `enregistrees` + (ETAT ? ` · collecteur au cycle ${ETAT.cycle}` : "");
+}
+function majSelecteur(){
+  const s=document.getElementById("res"), avant=s.value;
+  s.innerHTML="";
+  for(const k of KINDS){
+    const o=document.createElement("option");
+    o.value=k; o.textContent=nom(k)+"  ("+k+")";
+    s.appendChild(o);
+  }
+  if(avant && KINDS.includes(+avant)) s.value=avant;
+  else if(KIND!=null && KINDS.includes(KIND)) s.value=String(KIND);
+  else { KIND = KINDS.includes(146)?146:KINDS[0]; s.value=String(KIND); }
+  KIND=+s.value;
 }
 
-async function veille(amorce) {
-  if (EN_COURS) return;
-  const sha = await shaLive();
-  PROCHAIN = Date.now() + cadence();
+/* ============================================================== demarrage = */
+document.getElementById("o_marche").onclick=()=>basculer("marche");
+document.getElementById("o_produit").onclick=()=>basculer("produit");
+document.getElementById("res").onchange=e=>{ KIND=+e.target.value;
+  majQualites(); rendProduit(); };
+document.querySelectorAll("#per button").forEach(b=>b.onclick=()=>{
+  HEURES=+b.dataset.h;
+  document.querySelectorAll("#per button").forEach(x=>
+    x.setAttribute("aria-pressed", x===b));
+  VUE==="produit" ? rendProduit() : rendMarche();
+});
+["i_frais","i_tr"].forEach(id=>document.getElementById(id)
+  .addEventListener("input",()=>{ if(VUE==="produit"){ dessineAbsorption(KIND); rendMarge(KIND); }}));
 
-  if (sha && sha === SHA && !amorce) { bandeau(); return; }   // rien de neuf
-  if (sha) SHA = sha;
-  else if (!amorce && MAJ && Date.now() - MAJ < 5 * 60000) { bandeau(); return; }
-
-  EN_COURS = true; bandeau();
-  try { await demarrer(); MAJ = Date.now(); }
-  finally { EN_COURS = false; bandeau(); }
-}
-
-(async () => {
-  await veille(true);                       // SHA connu avant le 1er affichage
-  setTimeout(function boucle() {
-    veille().finally(() => setTimeout(boucle, cadence()));
-  }, cadence());
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) veille();         // revenir sur l'onglet = du frais
-  });
+(async()=>{
+  document.querySelector('#per button[data-h="24"]').setAttribute("aria-pressed",true);
+  for(const id of ["c_res","c_qual","c_frais","c_tr"])
+    document.getElementById(id).hidden = true;      // vue marche au demarrage
+  await veille(true);
+  const e=await charge(L("etat.json"));
+  if(e){ try{ ETAT=JSON.parse(e); }catch(_){} }
+  if(await chargerTout()){
+    MAJ=Date.now(); majSelecteur(); majSousTitre(); rendMarche();
+  }else{
+    document.getElementById("sous").innerHTML =
+      '<span style="color:var(--critique)">Aucune donnee lisible.</span> '+
+      'La collecte a-t-elle deja tourne ?';
+  }
+  bandeau();
+  setTimeout(function boucle(){ veille().finally(()=>setTimeout(boucle,cadence())); },
+             cadence());
+  document.addEventListener("visibilitychange",()=>{ if(!document.hidden) veille(); });
 })();
+
 </script>
-</body>
-</html>
