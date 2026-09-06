@@ -98,12 +98,22 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
   color:var(--ink2)}
 .leg span{display:inline-flex;align-items:center;gap:6px}
 .leg i{width:14px;height:2px;border-radius:1px;display:inline-block}
+/* le bandeau de fraicheur : discret quand tout va bien, visible sinon */
+#frais{margin-top:-6px;font-size:12px;display:flex;align-items:center;gap:7px}
+#frais.vieux{color:var(--warn,#e0a030)}
+#frais.casse{color:var(--err,#e05252)}
+.pouls{width:7px;height:7px;border-radius:50%;background:#3fb950;flex:0 0 auto}
+#frais.charge .pouls{animation:bat .9s ease-in-out infinite}
+#frais.vieux .pouls{background:#e0a030}
+#frais.casse .pouls{background:#e05252}
+@keyframes bat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(1.6)}}
 </style>
 </head>
 <body>
 <div class="wrap">
 <h1>Marche Sim Companies</h1>
 <p class="sub" id="sub">Chargement...</p>
+<p class="sub" id="frais"><span class="pouls"></span> connexion...</p>
 
 <div class="bar">
   <div><label for="res">Ressource</label><select id="res"></select></div>
@@ -198,8 +208,20 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
 <script>
 const NOMS = {"1": "Electricite", "2": "Eau", "3": "Pommes", "4": "Oranges", "5": "Raisin", "6": "Cereales", "7": "Steak", "8": "Saucisses", "9": "Oeufs", "10": "Petrole brut", "11": "Essence", "12": "Diesel", "13": "Transport", "14": "Mineraux", "15": "Bauxite", "16": "Silicium", "17": "Produits chimiques", "18": "Aluminium", "19": "Plastique", "20": "Processeurs", "21": "Composants electroniques", "22": "Batteries", "23": "Ecrans", "24": "Smartphones", "25": "Tablettes", "26": "Ordinateurs portables", "27": "Moniteurs", "28": "Televiseurs", "29": "Recherche vegetale", "30": "Recherche energie", "31": "Recherche miniere", "32": "Recherche electronique", "33": "Recherche elevage", "34": "Recherche chimique", "35": "Logiciel", "40": "Coton", "41": "Tissu", "42": "Minerai de fer", "43": "Acier", "44": "Sable", "45": "Verre", "46": "Cuir", "47": "Ordinateur de bord", "48": "Moteur electrique", "49": "Interieur de luxe", "50": "Interieur de voiture", "51": "Carrosserie", "52": "Moteur thermique", "53": "Voiture electrique economique", "54": "Voiture electrique de luxe", "55": "Voiture economique", "56": "Voiture de luxe", "57": "Camion", "58": "Recherche automobile", "59": "Recherche mode", "60": "Sous-vetements", "61": "Gants", "62": "Robe", "63": "Chaussures Simmi", "64": "Sacs a main", "65": "Baskets", "66": "Semences", "67": "Papillotes de Noel", "68": "Minerai d'or", "69": "Lingots d'or", "70": "Montre en or", "71": "Collier", "72": "Canne a sucre", "73": "Ethanol", "74": "Methane", "75": "Fibre de carbone", "76": "Composite carbone", "77": "Fuselage", "78": "Aile", "79": "Composants haut de gamme", "80": "Calculateur de vol", "81": "Cockpit", "82": "Controle d'attitude", "83": "Carburant de fusee", "84": "Reservoir", "85": "Fusee a propergol solide", "86": "Moteur de fusee", "87": "Bouclier thermique", "88": "Propulseur ionique", "89": "Reacteur", "98": "Quadricoptere", "100": "Recherche aerospatiale", "101": "Beton arme", "102": "Briques", "103": "Ciment", "104": "Argile", "105": "Calcaire", "106": "Bois", "107": "Poutres d'acier", "108": "Planches", "109": "Fenetres", "110": "Outils", "111": "Unites de construction", "112": "Bulldozer", "113": "Recherche materiaux", "114": "Robots", "115": "Vache", "116": "Cochon", "117": "Lait", "118": "Grains de cafe", "119": "Cafe moulu", "120": "Legumes", "121": "Pain", "122": "Fromage", "123": "Tarte aux pommes", "124": "Jus d'orange", "125": "Cidre", "126": "Biere de gingembre", "127": "Pizza", "128": "Pates", "129": "Hamburger", "130": "Lasagnes", "131": "Boulettes", "132": "Cocktails", "133": "Farine", "134": "Beurre", "135": "Sucre", "136": "Feves de cacao", "137": "Pate", "138": "Sauciere", "139": "Fourrage", "140": "Chocolat", "141": "Huile vegetale", "142": "Salade", "143": "Samosas", "144": "Boule de Noel", "145": "Recettes", "146": "Citrouille", "147": "Citrouille sculptee", "148": "Costume de sorciere", "149": "Soupe de citrouille", "150": "Sapin", "151": "Lapin de Paques", "152": "Douceurs du Ramadan", "153": "Glace chocolat", "154": "Glace pomme", "155": "Oeuf en creme"};
 const DEPOT = "https://raw.githubusercontent.com/cherlo30/simco-market/";
-const LIVE = DEPOT + "live/";        // le carnet vivant, reecrit toutes les 5 min
 const HIST = DEPOT + "main/";        // l'historique, une ecriture par heure
+
+// MESURE : raw.githubusercontent sert une BRANCHE avec ~5 min de retard, et
+// le parametre "?t=" n'y change rien — le CDN ignore la query string. On a
+// vu l'ancien chemin annoncer le run 65 quand le run 83 etait deja pousse.
+// En revanche une URL portant le SHA d'un commit est IMMUABLE : le cache ne
+// peut pas se tromper, il n'y a qu'une seule reponse possible. On demande
+// donc le SHA courant a l'API (60 appels/heure sans jeton, d'ou une
+// verification par minute), et on lit les fichiers a cette adresse-la.
+const API_REF = "https://api.github.com/repos/cherlo30/simco-market/commits/live";
+let SHA = null;               // commit courant de la branche live
+let QUOTA = null;             // appels API restants pour cette heure
+// tant qu'on n'a pas de SHA, on retombe sur la branche : perime, mais lisible
+const L = f => DEPOT + (SHA ? SHA : "refs/heads/live") + "/" + f;
 
 const nom = k => NOMS[k] || ("ressource " + k);
 const fmt = (v, d) => v == null || !isFinite(v) ? "—" :
@@ -225,10 +247,12 @@ function duree(ms) {
 /* ---------- lecture ------------------------------------------------ */
 
 async function charge(url, relatif) {
-  // raw.githubusercontent repond "cache-control: max-age=300" : sans jeton
-  // qui change, le navigateur ET le CDN servent une version vieille de cinq
-  // minutes. Le jeton descend donc a 5 s, la maille de notre rafraichissement.
-  const cb = "?t=" + Math.floor(Date.now() / 5000);
+  // Une URL qui porte un SHA de commit designe un contenu qui ne changera
+  // JAMAIS : on la laisse telle quelle, pour que le cache fasse son travail
+  // au lieu de retelecharger 836 Ko. Le jeton anti-cache ne sert que sur les
+  // URL de branche, ou le contenu bouge sous nos pieds.
+  const immuable = /\/[0-9a-f]{40}\//.test(url);
+  const cb = immuable ? "" : "?t=" + Math.floor(Date.now() / 5000);
   for (const u of (relatif ? [relatif + cb, url + cb] : [url + cb])) {
     try {
       const r = await fetch(u, {cache: "no-store"});
@@ -284,8 +308,8 @@ function moisRecents(n) {
 async function demarrer() {
   const mois = moisRecents(2);
   const [tOrdres, tHeure, ...tHist] = await Promise.all([
-    charge(LIVE + "ordres.csv", "live/ordres.csv"),
-    charge(LIVE + "heure_horaire.csv", "live/heure_horaire.csv"),
+    charge(L("ordres.csv")),
+    charge(L("heure_horaire.csv")),
     ...mois.map(m => charge(HIST + "data/horaire/" + m + ".csv",
                             "data/horaire/" + m + ".csv"))
   ]);
@@ -316,6 +340,10 @@ async function demarrer() {
   }
 
   HORAIRE.clear();          // sinon chaque rafraichissement empile les heures
+  // Les volumes sont mis en cache par ressource (VOL_KIND). Sans cette
+  // remise a zero, un rafraichissement gardait les volumes du tout premier
+  // chargement : les prix bougeaient, les volumes non.
+  VOL_KIND = null;
   for (const r of hist) {
     const cle = (+r.kind) + "|" + (+r.quality || 0);
     if (!HORAIRE.has(cle)) HORAIRE.set(cle, []);
@@ -412,7 +440,7 @@ async function changerRessource() {
       Promise.all(moisRecents(2).map(m =>
         charge(HIST + "data/volume/" + k + "/" + m + ".csv",
                "data/volume/" + k + "/" + m + ".csv"))),
-      charge(LIVE + "heure_volume.csv", "live/heure_volume.csv")
+      charge(L("heure_volume.csv"))
     ]);
     tv.filter(Boolean).forEach(t => VOLUME.push(...csv(t)));
     csv(th).filter(r => r.kind == k).forEach(r => VOLUME.push(r));
@@ -1093,54 +1121,93 @@ function tableau(pts) {
 }
 
 /* ---------- la veille ----------------------------------------------
-   Recharger le carnet "au cas ou" coute 210 Ko a chaque fois. On demande
-   donc d'abord etat.json — 200 octets — qui porte le numero du run. Tant
-   qu'il n'a pas bouge, il ne s'est RIEN passe et on ne telecharge rien.
-   Des qu'il change, c'est qu'un run vient de finir : on rafraichit.
-   La page ne se recharge jamais : la ressource regardee, les qualites
-   cochees et la position dans la page sont conservees.               */
-const POLL = 10000;           // on demande des nouvelles toutes les 10 s
-let VU = null;                // signature du dernier run vu
-let EN_COURS = false;         // un rafraichissement a la fois
-let DERNIER = Date.now();     // repli si etat.json n'existe pas encore
+   On ne peut pas demander "quoi de neuf ?" a raw.githubusercontent : il
+   repond avec cinq minutes de retard. On le demande donc a l'API, qui rend
+   le SHA du dernier commit de `live`. Ce SHA sert ensuite d'adresse : elle
+   est immuable, donc toujours exacte.
+
+   L'API sans jeton donne 60 appels par heure et par adresse IP. Une
+   verification par minute tient donc pile dans le budget — et le code se
+   ralentit tout seul si la reserve baisse, pour ne jamais tomber a sec. */
+// 60 s donnerait 60 appels/heure : exactement le budget, donc aucune marge
+// pour un rechargement manuel ou un second onglet. 70 s en laisse une.
+const POLL = 70000;
+let PROCHAIN = Date.now() + POLL;   // pour le compte a rebours
+let MAJ = null;               // instant du dernier rafraichissement reussi
+let EN_COURS = false;
+let SOUCI = null;             // message a afficher si quelque chose cloche
+
+function bandeau() {
+  const el = document.getElementById("frais");
+  if (!el) return;
+  const age = MAJ ? Math.round((Date.now() - MAJ) / 1000) : null;
+  const dans = Math.max(0, Math.round((PROCHAIN - Date.now()) / 1000));
+  let txt, classe = "";
+  if (EN_COURS) { txt = "mise a jour en cours..."; classe = "charge"; }
+  else if (SOUCI) { txt = SOUCI; classe = "casse"; }
+  else if (age === null) { txt = "premier chargement..."; classe = "charge"; }
+  else {
+    txt = "a jour depuis " + (age < 60 ? age + " s"
+        : Math.floor(age / 60) + " min " + (age % 60) + " s")
+        + " · prochaine verification dans " + dans + " s";
+    if (age > 240) classe = "vieux";           // 4 min sans rien : anormal
+  }
+  if (QUOTA != null && QUOTA < 10)
+    txt += " · reserve API basse (" + QUOTA + "), cadence ralentie";
+  el.className = "sub " + classe;
+  el.innerHTML = '<span class="pouls"></span>' + txt;
+}
+setInterval(bandeau, 1000);   // le compte a rebours bouge chaque seconde
+
+async function shaLive() {
+  try {
+    const r = await fetch(API_REF, {cache: "no-store",
+      headers: {"Accept": "application/vnd.github.sha"}});   // reponse = le SHA nu
+    const q = r.headers.get("x-ratelimit-remaining");
+    if (q != null) QUOTA = +q;
+    if (r.status === 403 || r.status === 429) {
+      SOUCI = "reserve API epuisee — lecture de secours, jusqu'a 5 min de retard";
+      return null;
+    }
+    if (!r.ok) { SOUCI = "GitHub repond " + r.status; return null; }
+    SOUCI = null;
+    return (await r.text()).trim();
+  } catch (e) {
+    SOUCI = "reseau injoignable";
+    return null;
+  }
+}
+
+// La cadence s'adapte a ce qu'il reste : on ne veut jamais epuiser le
+// budget, sinon la page devient aveugle jusqu'a la prochaine heure ronde.
+function cadence() {
+  if (QUOTA == null) return POLL;
+  if (QUOTA < 5) return 10 * 60000;
+  if (QUOTA < 15) return 3 * 60000;
+  return POLL;
+}
 
 async function veille(amorce) {
   if (EN_COURS) return;
-  const t = await charge(LIVE + "etat.json");
+  const sha = await shaLive();
+  PROCHAIN = Date.now() + cadence();
 
-  if (!t) {
-    // etat.json absent : la version de collect.py qui l'ecrit n'est pas
-    // encore deployee. On retombe sur un rafraichissement au temps, une
-    // fois par minute — jamais un rechargement de page.
-    if (!amorce && Date.now() - DERNIER > 60000) {
-      DERNIER = Date.now();
-      EN_COURS = true;
-      try { await demarrer(); } finally { EN_COURS = false; }
-    }
-    return;
-  }
+  if (sha && sha === SHA && !amorce) { bandeau(); return; }   // rien de neuf
+  if (sha) SHA = sha;
+  else if (!amorce && MAJ && Date.now() - MAJ < 5 * 60000) { bandeau(); return; }
 
-  let e;
-  try { e = JSON.parse(t); } catch (err) { return; }
-  const sig = e.run_no + "|" + e.dernier + "|" + e.faits;
-  ETAT = e;
-
-  if (amorce) { VU = sig; return; }      // premier passage : on note, sans plus
-  if (sig === VU) return;                // rien de neuf depuis le dernier run
-
-  VU = sig;
-  DERNIER = Date.now();
-  EN_COURS = true;
-  try { await demarrer(); } finally { EN_COURS = false; }
+  EN_COURS = true; bandeau();
+  try { await demarrer(); MAJ = Date.now(); }
+  finally { EN_COURS = false; bandeau(); }
 }
 
 (async () => {
-  await veille(true);          // connaitre l'etat avant le premier affichage
-  await demarrer();
-  setInterval(veille, POLL);
-  // revenir sur l'onglet doit donner du frais tout de suite, sans attendre
+  await veille(true);                       // SHA connu avant le 1er affichage
+  setTimeout(function boucle() {
+    veille().finally(() => setTimeout(boucle, cadence()));
+  }, cadence());
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) veille();
+    if (!document.hidden) veille();         // revenir sur l'onglet = du frais
   });
 })();
 </script>
