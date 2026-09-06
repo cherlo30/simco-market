@@ -502,12 +502,13 @@ def pousser_live(fichiers):
 def ajouter_main(chemin, entete, lignes, heures):
     """Ajoute des heures TERMINEES a un fichier d'historique.
 
-    Si une heure y figure deja — parce qu'un autre passage l'avait deja
-    ecrite en partie — les deux enregistrements se COMBINENT : les ventes
-    s'additionnent, le plus haut et le plus bas gardent leurs extremes,
-    l'ouverture reste la premiere connue. On ne remplace jamais : chaque
-    processus ne voit qu'une partie des ressources avant de mourir, et
-    ecraser reviendrait a jeter le travail du precedent."""
+    Les doublons DEJA presents dans le fichier se combinent entre eux (un
+    heritage de l'epoque ou plusieurs processus ecrivaient chacun leur
+    morceau). Mais une heure qu'on REECRIT aujourd'hui remplace la
+    precedente au lieu de s'y ajouter : l'agregat en memoire porte la
+    totalite de l'heure — les quinze lectures de chaque produit y sont deja
+    cumulees — donc l'additionner a ce qui existe deja compterait tout en
+    double. C'est ce qui rend une reprise apres echec de push inoffensive."""
     os.makedirs(os.path.dirname(chemin), exist_ok=True)
     lignes = [[str(x) for x in l] for l in lignes]
 
@@ -546,8 +547,7 @@ def ajouter_main(chemin, entete, lignes, heures):
         k = cle(l)
         table[k] = combiner(entete, table[k], l) if k in table else l
     for l in lignes:
-        k = cle(l)
-        table[k] = combiner(entete, table[k], l) if k in table else l
+        table[cle(l)] = l            # remplace : voir la docstring
 
     with open(chemin, "w", newline="") as fh:
         w = csv.writer(fh)
@@ -557,17 +557,23 @@ def ajouter_main(chemin, entete, lignes, heures):
 
 
 def pousser_main(message):
+    """Renvoie True si l'historique est REELLEMENT arrive sur GitHub.
+
+    Ce booleen n'est pas decoratif : c'est lui qui autorise l'appelant a
+    oublier l'heure qu'il vient d'archiver. Tant qu'il est faux, l'heure
+    doit rester en memoire, sinon elle n'existe plus nulle part."""
     git("add", "data")
     if git("diff", "--staged", "--quiet").returncode == 0:
-        return
+        return True                     # rien a envoyer : rien a perdre
     git("commit", "-m", message)
     for i in range(5):
         git("pull", "--rebase", "--autostash", "origin", BRANCHE)
         if git("push").returncode == 0:
             print("  historique enregistre")
-            return
+            return True
         time.sleep(5 + i * 5)
     print("  ! ECHEC de l'enregistrement de l'historique")
+    return False
 
 
 # ------------------------------------------------------------- traitement
@@ -1055,14 +1061,23 @@ def fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat=None,
             lp = lignes_prix(pxh, {h})
             if lp:
                 ajouter_main(f"data/prix/{mois}.csv", EN_PRIX, lp, {h})
-        for cle in [c for c in pxh if c[0] in finies]:
-            del pxh[cle]
-        for cle in [c for c in agg if c[0] in finies]:
-            del agg[cle]
-        for cle in [c for c in volp if c[0] in finies]:
-            del volp[cle]
-        pousser_main("heures " + ", ".join(finies))
-        print(f"  {len(finies)} heure(s) archivee(s) : {', '.join(finies)}")
+        # L'ORDRE COMPTE. Avant, on supprimait l'heure de la memoire PUIS on
+        # poussait. Si le push echouait, l'heure n'existait plus ni en
+        # memoire, ni sur live, ni sur main : elle etait perdue, en silence,
+        # et le runner emportait les fichiers locaux avec lui.
+        # Maintenant on ne l'oublie que si elle est arrivee a bon port. Sinon
+        # elle reste dans le carnet vivant et repart au run suivant.
+        if pousser_main("heures " + ", ".join(finies)):
+            for cle in [c for c in pxh if c[0] in finies]:
+                del pxh[cle]
+            for cle in [c for c in agg if c[0] in finies]:
+                del agg[cle]
+            for cle in [c for c in volp if c[0] in finies]:
+                del volp[cle]
+            print(f"  {len(finies)} heure(s) archivee(s) : {', '.join(finies)}")
+        else:
+            print(f"  ! {len(finies)} heure(s) NON archivee(s), gardee(s) en "
+                  f"memoire pour le prochain run : {', '.join(finies)}")
 
     fichiers = {
         "ordres.csv": en_csv(EN_ORDRES, lignes_ordres(ordres)),
