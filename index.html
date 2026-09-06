@@ -150,7 +150,7 @@ footer{color:var(--muted);font-size:12px;margin-top:28px;text-align:center}
     <div><label for="i_tr">Transport ($/u)</label><input id="i_tr" type="number" step="0.001" value="0.362"><div class="frais" id="tr_marche" style="margin:3px 0 0"></div></div>
     <div><label for="i_tru">Transport par article</label><input id="i_tru" type="number" step="0.1" value="1"></div>
   </div>
-  <div class="qbox" style="margin:2px 0 12px"><label id="l_dsp"><input type="checkbox" id="i_dsp"> inclure les offres entierement disparues (deduction, pas mesure)</label></div>
+  <p class="note" id="n_mes" style="margin:2px 0 12px"></p>
   <div class="note" id="n_dem"></div>
   <h3 style="font-size:13px;margin:16px 0 2px;font-weight:600">Ce qui s'est echange, prix par prix</h3>
   <p class="h" id="h_vol">Les ventes observees a chaque palier de prix.</p>
@@ -396,7 +396,7 @@ async function demarrer() {
 
   if (PREMIER) {
     PREMIER = false;
-    ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod", "i_dsp"]
+    ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod"]
       .forEach(id => document.getElementById(id)
         .addEventListener("change", id === "res" ? changerRessource : dessine));
     document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
@@ -642,9 +642,9 @@ function kpis(pts, carnet, qs) {
       bas > 0 ? "ecart de " + fmt((haut / bas - 1) * 100, 1) + " %" : "sur le meilleur prix"],
     ["Profondeur a -5 %", prof != null ? ent(prof) + " u" : "—",
       carnet.length + " offres sur " + qs.length + " qualite(s)"],
-    ["Vendu sur 24 h", v24 ? ent(v24) + " u" : "—",
-      d24 ? ent(d24) + " u de plus en offres disparues" :
-      (v24 ? "ventes mesurees" : "se remplit avec le temps")]
+    ["Vendu sur 24 h", (v24 + d24) ? ent(v24 + d24) + " u" : "—",
+      (v24 + d24) ? ent(v24) + " u mesurees · " + ent(d24) + " u deduites"
+                  : "se remplit avec le temps"]
   ].map(([a, b, c]) => '<div class="kpi"><div class="k">' + a + '</div><div class="v">' +
     b + '</div><div class="n">' + c + '</div></div>').join("");
 }
@@ -655,8 +655,6 @@ function kpis(pts, carnet, qs) {
    donc du prix le plus haut vers le plus bas. --------------------------- */
 function demande(qs, depuis, carnet, pts) {
   const elD = document.getElementById("c_dem"), elR = document.getElementById("c_rev");
-  const avecDsp = document.getElementById("i_dsp").checked;
-  document.getElementById("l_dsp").classList.toggle("on", avecDsp);
   const ventes = VOLUME.filter(r => SELQ.has(r.q) && (!depuis || r.h >= depuis));
 
   // Le debit se divise par les heures REELLEMENT OBSERVEES, pas par les heures
@@ -668,7 +666,10 @@ function demande(qs, depuis, carnet, pts) {
   let mes = 0, ded = 0;
   for (const r of ventes) {
     mes += r.v; ded += r.d;
-    const v = r.v + (avecDsp ? r.d : 0);
+    // Une offre entierement achetee est une vente au meme titre qu'une offre
+    // grignotee : la seule difference est qu'on la DEDUIT au lieu de la
+    // mesurer. Les separer dans le total n'avait aucun sens.
+    const v = r.v + r.d;
     if (v > 0) par.set(r.p, (par.get(r.p) || 0) + v);
   }
   const paliers = [...par.entries()].map(([p, v]) => ({p, v})).sort((a, b) => a.p - b.p);
@@ -682,11 +683,16 @@ function demande(qs, depuis, carnet, pts) {
   const x0 = bornes.length ? Math.min(...bornes) : 0;
   const x1 = bornes.length ? Math.max(...bornes) : 1;
 
-  document.getElementById("l_dsp").lastChild.textContent =
-    " inclure les offres entierement disparues : " + ent(ded) +
-    " u deduites, contre " + ent(mes) + " u mesurees";
+  // On ne cache pas la part de deduction : elle reste affichee, mais comme
+  // une indication de FIABILITE, pas comme un volume separe.
+  const part = mes + ded > 0 ? Math.round(ded / (mes + ded) * 100) : 0;
+  document.getElementById("n_mes").textContent = mes + ded
+    ? "Sur ces ventes, " + ent(mes) + " u sont mesurees (une offre a perdu de "
+      + "la quantite) et " + ent(ded) + " u sont deduites (l'offre entiere a "
+      + "disparu alors qu'elle etait la moins chere) — soit " + part + " % de deduction."
+    : "";
 
-  volumeParPrix(paliers, total, x0, x1, avecDsp);
+  volumeParPrix(paliers, total, x0, x1);
 
   const base = observees < 24 ? observees + " heures observees"
              : fmt(jours, 1) + " jours observes";
@@ -809,11 +815,10 @@ function courbeXY(el, cle, pts, fx, fy, fmtX, fmtY, titreY, seuil, nomSeuil, inf
 }
 
 /* --- LE graphique : le volume echange a chaque prix --- */
-function volumeParPrix(pts, total, x0, x1, avecDsp) {
+function volumeParPrix(pts, total, x0, x1) {
   const el = document.getElementById("c_vol");
   document.getElementById("h_vol").textContent = pts.length
     ? ent(total) + " unites ont change de mains sur la periode" +
-      (avecDsp ? ", offres disparues comprises" : " (ventes mesurees seules)") +
       ". Chaque barre est posee a son prix reel : les trous sont des prix ou " +
       "rien ne s'est echange."
     : "Aucune vente enregistree sur cette periode pour les qualites cochees.";
@@ -944,7 +949,8 @@ function courbePrix(k, qs, depuis, fus) {
     prix(p[i].c) + " $</b>" +
     (p[i].hi != null && !multi ? '<br><span class="dim">haut ' + prix(p[i].hi) +
       " · bas " + prix(p[i].lo) + "</span>" : "") +
-    (p[i].vendu ? "<br>" + ent(p[i].vendu) + " u vendues" : ""));
+    ((p[i].vendu + (p[i].disparu || 0)) ? "<br>" +
+       ent(p[i].vendu + (p[i].disparu || 0)) + " u vendues" : ""));
 }
 
 function courbeProfondeur(pts) {
@@ -1106,18 +1112,23 @@ function tableau(pts) {
   const p = pts.slice(-24).reverse();
   document.getElementById("t_tab").innerHTML =
     '<tr><th>Heure UTC</th><th>Ouverture</th><th>Haut</th><th>Bas</th><th>Cloture</th>' +
-    '<th>Offres</th><th>Vendu</th><th>Disparu</th><th>Repose</th><th>Retire</th>' +
+    '<th>Offres</th><th>Vendu</th><th>Repositionne</th><th>Retire</th>' +
     '<th>Profondeur -5 %</th></tr>' +
-    (p.length ? p.map(d => '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" +
+    (p.length ? p.map(d => {
+      // vendu + disparu : la mesure et la deduction decrivent le meme fait,
+      // une vente. Le detail reste au survol, pour qui veut la nuance.
+      const v = (d.vendu || 0) + (d.disparu || 0);
+      const info = v ? ' title="' + ent(d.vendu || 0) + " u mesurees, " +
+                       ent(d.disparu || 0) + ' u deduites"' : "";
+      return '<tr><td>' + d.h.replace("T", " ") + " h</td><td>" +
       prix(d.o) + "</td><td>" + prix(d.hi) + "</td><td>" + prix(d.lo) + "</td><td>" +
-      prix(d.c) + "</td><td>" + (d.n ?? "—") + "</td><td>" +
-      (d.vendu ? ent(d.vendu) : '<span class="dim">—</span>') + "</td><td>" +
-      (d.disparu ? ent(d.disparu) : '<span class="dim">—</span>') + "</td><td>" +
+      prix(d.c) + "</td><td>" + (d.n ?? "—") + "</td><td" + info + ">" +
+      (v ? ent(v) : '<span class="dim">—</span>') + "</td><td>" +
       (d.repose ? ent(d.repose) : '<span class="dim">—</span>') + "</td><td>" +
       (d.retire ? ent(d.retire) : '<span class="dim">—</span>') + "</td><td>" +
       (d.prof != null ? ent(d.prof) : '<span class="dim">—</span>') +
-      "</td></tr>").join("") :
-      '<tr><td colspan="11" class="dim">Rien a afficher.</td></tr>');
+      "</td></tr>"; }).join("") :
+      '<tr><td colspan="10" class="dim">Rien a afficher.</td></tr>');
 }
 
 /* ---------- la veille ----------------------------------------------
