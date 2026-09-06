@@ -72,6 +72,55 @@ jobs:
           # carnet de plus. Mettre 1 pour un releve a chaque run, 4 pour un
           # releve par minute environ.
           TICKER_RUNS: "2"
+          # --- allocation de l'attention -------------------------------
+          # On lit en priorite la ou il se passe des choses. PLANCHER est le
+          # bouton de concentration : plus il est bas, plus le budget va aux
+          # produits actifs. Mesure sur 4 h simulees avec tes vraies
+          # activites (lectures/heure du plus actif vs d'un produit mort,
+          # et pire attente observee) :
+          #   0.30 -> 25 vs 13   · pire attente  5 min  (presque uniforme)
+          #   0.05 -> 58 vs 10   · pire attente  6 min  (defaut)
+          #   0.01 -> 113 vs 5   · pire attente 13 min
+          #   0.002-> 120 vs 2   · pire attente 30 min  (bute sur AGE_MAX)
+          PLANCHER: "0.05"
+          # LES DEUX ECHEANCES. Ce ne sont pas des souhaits mais des
+          # CHARGES : exiger une lecture toutes les T min pour N produits
+          # coute N/T lectures par minute. Capacite mesuree : 32,6/min.
+          #   AGE_BOUGE 3 + AGE_MAX 5 -> 36,0/min : NE TIENT PAS
+          #   AGE_BOUGE 3 + AGE_MAX 7 -> 31,1/min : tient
+          #   AGE_BOUGE 4 + AGE_MAX 5 -> 31,2/min : tient (retenu)
+          # collect.py refait ce calcul a chaque run et previent s'il ne
+          # tient plus.
+          AGE_BOUGE_MIN: "4"
+          # MESURE : 76 % du volume s'echange hors qualite 0, sur 7,8
+          # qualites actives par produit. Le ticker ne rend qu'un prix par
+          # produit : il est aveugle aux trois quarts de l'activite. Le
+          # balayage regulier n'est donc pas un filet de securite, c'est le
+          # principal moyen de voir le marche.
+          #
+          # LE PLAFOND EST LE VRAI BOUTON DE CONCENTRATION. Il consomme
+          # 142/AGE_MAX lectures par minute avant meme qu'on ait priorise
+          # quoi que ce soit ; ce qui reste va aux produits actifs. Mesure
+          # sur 2 h simulees, 10 ressources tres actives contre 132 calmes :
+          #
+          #   AGE_MAX  age max  ratio actif/calme  lect/h actif  lect/h calme
+          #     5 min    4,5m         1,8x              25            13
+          #     6 min    5,6m         5,0x              55            11
+          #     7 min    6,7m         7,9x              76            10
+          #     8 min    7,5m        10,2x              88             9
+          #    10 min    9,6m        15,4x             109             7
+          #
+          # A 5 min la capacite est saturee : il ne reste presque rien pour
+          # prioriser. Une minute de plus TRIPLE l'attention portee aux
+          # produits actifs (25 -> 55 lectures/heure) et ne coute que deux
+          # lectures par heure aux calmes. Aucun produit n'est jamais oublie
+          # dans aucun de ces reglages.
+          AGE_MAX_MIN: "5"
+          # Le prix a change depuis notre derniere lecture : on double le
+          # score. Le ticker coute une requete et oriente les neuf autres.
+          BONUS_TICKER: "2"
+          # Poids du dernier releve dans la moyenne mobile du debit.
+          MEMOIRE: "0.3"
           # Plafond de securite : un run qui depasse ca s'arrete de lui-meme
           # et passe quand meme le temoin. Ce n'est pas la duree normale.
           DUREE_MIN: "10"
