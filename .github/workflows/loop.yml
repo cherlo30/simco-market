@@ -1,5 +1,11 @@
 name: collecte
 
+# Le titre de CHAQUE execution dans la liste Actions. Le run precedent nous
+# passe l'etiquette qu'il a calculee : la page devient lisible sans ouvrir
+# un seul run. Les declenchements manuels ou par cron n'en ont pas, ils
+# gardent un titre neutre.
+run-name: ${{ inputs.etiquette || 'collecte (depart)' }}
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,6 +13,10 @@ on:
         description: "Nombre de carnets lus par run (9 par defaut, 1 pour tester)"
         required: false
         default: "9"
+      etiquette:
+        description: "Titre du run (rempli automatiquement par le run precedent)"
+        required: false
+        default: ""
   schedule:
     - cron: "17 */3 * * *"      # filet de securite si la chaine se casse
 
@@ -58,6 +68,10 @@ jobs:
           # debut du run, et un a la fin UNIQUEMENT s'il est gratuit
           # (run long ET place libre dans la fenetre).
           TICKER_SEC: "60"
+          # Un releve de prix un run sur deux : la place liberee va a un
+          # carnet de plus. Mettre 1 pour un releve a chaque run, 4 pour un
+          # releve par minute environ.
+          TICKER_RUNS: "2"
           # Plafond de securite : un run qui depasse ca s'arrete de lui-meme
           # et passe quand meme le temoin. Ce n'est pas la duree normale.
           DUREE_MIN: "10"
@@ -80,6 +94,8 @@ jobs:
         if: always()
         env:
           PAT_BRUT: ${{ secrets.PAT }}
+          # secondes d'attente avant de passer le temoin. 0 = a fond.
+          PAUSE_AVANT: "0"
         run: |
           # Avant, on jugeait un run a sa DUREE : moins de 90 s = plantage.
           # Avec des runs d'une minute, ce critere ne veut plus rien dire.
@@ -99,7 +115,24 @@ jobs:
             echo "Le secret PAT est vide ou absent : impossible de passer le temoin."
             exit 1
           fi
-          echo "Lot collecte en ${ecoule}s. Passage du temoin au lot suivant."
+          # collect.py a ecrit le titre du prochain run : on le lui donne,
+          # il s'affichera dans la liste des executions a la place du
+          # "collecte n123" par defaut.
+          ETIQ="$(head -c 200 prochain.txt 2>/dev/null | tr -d '\n')"
+          [ -z "$ETIQ" ] && ETIQ="collecte"
+          # ATTENTION, lire le commentaire en tete de collect.py : le quota
+          # de 10 requetes/minute est compte PAR PROCESSUS. Chaque run
+          # repart d'une fenetre vierge, donc la chaine envoie en realite
+          # 10 requetes toutes les ~15 s, soit ~40 par minute. PAUSE_AVANT
+          # espace les runs pour ramener le debit reel a la valeur voulue :
+          #   0  -> aucune retenue (debit ~40/min)
+          #   45 -> un run par minute environ (debit ~10/min)
+          if [ "${PAUSE_AVANT:-0}" -gt 0 ]; then
+            echo "Pause de ${PAUSE_AVANT}s pour tenir le debit voulu."
+            sleep "${PAUSE_AVANT}"
+          fi
+          echo "Lot collecte en ${ecoule}s. Passage du temoin : $ETIQ"
           gh workflow run loop.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}" \
-             -f lot="${{ github.event.inputs.lot || '9' }}"
+             -f lot="${{ github.event.inputs.lot || '9' }}" \
+             -f etiquette="$ETIQ"
           echo "Temoin passe."
