@@ -48,8 +48,16 @@ disparu : l'offre entiere a disparu ALORS QU'ELLE ETAIT LA MOINS CHERE.
           vente — mais ce peut aussi etre une annulation ou une remise en
           vente a un autre prix. C'est une DEDUCTION, pas une mesure.
 repose  : l'offre a disparu ALORS QU'ELLE NE POUVAIT PAS ETRE ACHETEE (une
-          moins chere est restee intacte), et le MEME vendeur a repose au
-          meme instant sur la meme qualite : il a change son prix.
+          moins chere est restee intacte), et le meme vendeur a remis en
+          vente. Il faut TROIS preuves reunies, pas une :
+            1. l'offre etait inachetable — au-dessus du front ;
+            2. le vendeur a une offre neuve sur la meme qualite, posee
+               APRES le dernier instant ou l'on a vu l'ancienne (la date de
+               mise en vente vient du jeu, ce n'est pas une supposition) ;
+            3. cette offre neuve est a un AUTRE prix — repositionner, c'est
+               changer de prix ; sinon ce n'est pas un repositionnement.
+          Et seule la quantite REVENUE compte comme repose : 15 M retires
+          contre 10 M reposes, ce sont 10 M de repose et 5 M de retrait.
 
           L'ordre des regles compte. Le front passe TOUJOURS en premier :
           il dit ce qui pouvait physiquement etre achete. La remise en vente
@@ -642,18 +650,31 @@ def traiter(kind, book, ordres, agg, volp, ts):
         # --- les offres que ce vendeur vient de reposer ----------------
         # Un vendeur ne peut pas modifier le prix d'une offre : il la retire
         # et en repose une autre, avec un nouveau numero. Vu du carnet, c'est
-        # une disparition suivie d'une apparition. Si le meme vendeur
-        # reapparait au meme instant sur la meme qualite, c'est presque
-        # surement ca — pas une vente.
-        # (avant : set(ordres) etait reconstruit ICI, donc pour CHAQUE qualite
-        # de CHAQUE ressource — quinze millions d'insertions par tour pour rien)
+        # une disparition suivie d'une apparition.
+        #
+        # Encore faut-il le PROUVER. L'ancienne regle se contentait de "ce
+        # vendeur a une offre neuve quelque part sur cette qualite" et
+        # reversait toute la quantite disparue en repose. Un gros producteur
+        # qui annule une vieille offre chere ET met en vente sa production du
+        # jour cochait la case sans avoir rien repositionne.
+        #
+        # On garde donc, pour chaque offre neuve, de quoi verifier :
+        #   - son prix, qui doit DIFFERER de celui de l'offre disparue
+        #     (repositionner, c'est changer de prix ; sinon ce n'est pas un
+        #     repositionnement)
+        #   - sa date de mise en vente donnee par le jeu, qui doit etre
+        #     POSTERIEURE au dernier instant ou l'on a vu l'ancienne
+        #   - sa quantite, pour n'appeler "repose" que ce qui est vraiment
+        #     revenu en vente
         neufs_par_vendeur = {}
         for x in offres:
             if str(x["id"]) in ordres:
                 continue
             v = str((x.get("seller") or {}).get("id", ""))
             if v:
-                neufs_par_vendeur.setdefault(v, []).append(float(x["quantity"]))
+                neufs_par_vendeur.setdefault(v, []).append(
+                    {"qt": float(x["quantity"]), "p": float(x["price"]),
+                     "pose_le": iso(x.get("posted"))})
 
         # --- ce qui a bouge -------------------------------------------
         for oid in anciens_par_q.get(q, []):
@@ -674,10 +695,25 @@ def traiter(kind, book, ordres, agg, volp, ts):
                 b = agg.get((h, kind, q))
                 if b is None:
                     continue
-                reposees = neufs_par_vendeur.get(av["sid"])
-                if reposees:
-                    reposees.pop()
-                    b["repose"] += av["qt"]
+                # A ce stade on SAIT que l'offre ne pouvait pas etre achetee
+                # (une moins chere est restee intacte) : elle a donc ete
+                # retiree. Reste a dire si son vendeur l'a remise en vente.
+                candidates = [c for c in neufs_par_vendeur.get(av["sid"], [])
+                              if abs(c["p"] - av["p"]) > 1e-9          # autre prix
+                              and c["pose_le"] and c["pose_le"] >= av["passage"]]
+                if candidates:
+                    # on apparie avec la plus proche en quantite : c'est
+                    # l'appariement le plus vraisemblable, et surtout il ne
+                    # depend pas de l'ordre du carnet
+                    c = min(candidates, key=lambda c: abs(c["qt"] - av["qt"]))
+                    neufs_par_vendeur[av["sid"]].remove(c)
+                    revenu = min(c["qt"], av["qt"])
+                    b["repose"] += revenu
+                    # 15 M retires et 10 M reposes, ce sont 10 M de
+                    # repositionnement ET 5 M de retrait sec. Tout mettre en
+                    # repose ferait disparaitre du marche 5 M sans le dire.
+                    if av["qt"] > revenu:
+                        b["retire"] += av["qt"] - revenu
                 else:
                     b["retire"] += av["qt"]
                 continue
