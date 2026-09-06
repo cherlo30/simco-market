@@ -6,17 +6,34 @@ PRINCIPE
 Le programme ne se souvient de rien. Sa memoire, c'est le fichier.
 
 A chaque demarrage il lit le carnet vivant sur la branche `live`, ainsi que
-le CURSEUR qui dit ou le run precedent s'est arrete. Il lit alors LOT
-ressources (neuf par defaut) en repartant juste apres le curseur, compare ce
-qu'il voit a ce que le fichier disait, en deduit ce qui s'est vendu,
-reecrit le fichier et le curseur — puis il s'arrete.
+l'ETAT : pour chaque produit, quand on l'a lu pour la derniere fois et a
+quel rythme il bouge. Il choisit alors les LOT produits dont il a
+probablement rate le plus de choses, les lit, compare, en deduit ce qui
+s'est vendu, reecrit tout — puis il s'arrete.
 
 UN RUN, UN CYCLE
 ----------------
 run   : une execution du programme. Il lit LOT carnets, enregistre, sort.
-        Une ou deux minutes, pas six heures.
-cycle : le tour complet des 142 ressources, soit 16 runs enchaines a LOT=9.
-        Arrive au bout de la liste, le curseur revient au debut tout seul.
+        Une quinzaine de secondes.
+cycle : le temps qu'il faut pour que TOUS les produits aient ete lus au
+        moins une fois. Ce n'est plus un tour de liste a longueur fixe :
+        les produits actifs y passent plusieurs fois, les produits morts
+        une seule.
+
+QUI LIRE D'ABORD
+----------------
+    score = (evenements par minute + PLANCHER) x minutes depuis la LECTURE
+            x BONUS_TICKER si le prix a change depuis cette lecture
+
+L'age porte sur la derniere LECTURE, jamais sur le dernier mouvement. C'est
+le point qui fait tout tenir : un produit tres actif ne peut pas se faire
+oublier (son debit le ramene en tete en quelques secondes) et un produit
+mort ne peut pas etre affame (son age grandit sans fin, et AGE_MAX finit de
+toute facon par forcer sa lecture).
+
+Trier par "a bouge il y a le plus longtemps" ferait exactement l'inverse :
+le produit le plus liquide bouge sans arret, son dernier mouvement est donc
+toujours recent, et il resterait eternellement en fin de file.
 
 Le programme ne sait pas qu'il fait partie d'une chaine, et n'a pas besoin
 de le savoir : tout ce qui doit survivre est dans le fichier. Si un run
@@ -163,10 +180,59 @@ TICKER_SEC = float(os.environ.get("TICKER_SEC", "60"))   # un ticker par minute
 # et 4 un releve par minute.
 TICKER_RUNS = max(1, int(os.environ.get("TICKER_RUNS", "2")))
 
-# Le tour est desormais strictement sequentiel : chaque produit est lu une
-# fois par cycle, ni plus ni moins. SUIVIS reste le seul privilege : ces
-# produits-la sont relus a CHAQUE run, en plus du lot du moment. Deux ou
-# trois suffisent ; au-dela, ils mangeraient tout le budget du run.
+# ------------------------------------------------------- qui lire d'abord
+#
+# Le tour n'est plus sequentiel : on lit en priorite la ou il se passe des
+# choses. Encore faut-il une regle qui ne laisse personne de cote.
+#
+# LE PIEGE, ET POURQUOI ON NE TRIE PAS PAR "A BOUGE IL Y A LONGTEMPS"
+# Classer par anciennete du dernier MOUVEMENT affame exactement le produit
+# le plus liquide : comme il bouge sans arret, son dernier mouvement est
+# toujours recent, donc il reste eternellement en fin de file. C'est
+# l'inverse du but recherche.
+#
+# LA REGLE : on classe par ce qu'on a probablement RATE depuis la derniere
+# lecture.
+#
+#     score = (evenements par minute + plancher) x minutes depuis la lecture
+#
+# Le second facteur est un age de LECTURE, pas de mouvement : il ne cesse
+# jamais de grandir, pour personne. Un produit tres actif remonte donc en
+# tete au bout de quelques secondes ; un produit mort met des heures, mais
+# il y arrive. Rien ne peut mourir de faim.
+#
+# On compte des EVENEMENTS (offres apparues, entamees, disparues) et non des
+# unites : c'est sans dimension, donc l'electricite qui s'echange par
+# millions ne noie pas les boules de Noel qui s'echangent par dizaines. Et
+# c'est justement le nombre d'evenements entre deux lectures qui degrade la
+# deduction du front — on asservit donc la cadence a ce qui abime la mesure.
+PLANCHER = float(os.environ.get("PLANCHER", "0.05"))    # evt/min plancher
+MEMOIRE = float(os.environ.get("MEMOIRE", "0.3"))       # poids du dernier releve
+BONUS_TICKER = float(os.environ.get("BONUS_TICKER", "2"))
+
+# DEUX ECHEANCES FERMES, qui passent devant le score.
+#
+# AGE_BOUGE : quand le ticker dit que le prix a change depuis notre derniere
+# lecture, on SAIT qu'il s'est passe quelque chose qu'on n'a pas vu. Le
+# bonus de score ne suffit pas : un produit endormi qui se reveille a un
+# debit nul, donc un score faible, et il pourrait attendre cinq minutes
+# derriere les habitues. On lui met donc une echeance : passe ce delai, il
+# est lu, point.
+#
+# AGE_MAX : le filet pour tout le reste — un produit peut s'echanger sans
+# que son prix bouge (carnet profond, ventes au meme prix), le ticker ne le
+# verra jamais. Personne n'attend plus que ca.
+# MESURE, sur 8 h de collecte : 76 % du volume et 69 % de la valeur
+# s'echangent HORS qualite 0, sur 7,8 qualites actives par produit en
+# moyenne. Or le ticker ne rend qu'UN prix par produit. Il est donc aveugle
+# aux trois quarts de l'activite — ventes sur les autres qualites, ajouts
+# qui ne changent pas le meilleur prix. AGE_MAX n'est pas un filet de
+# securite lointain : c'est le principal moyen de voir le marche.
+AGE_BOUGE = float(os.environ.get("AGE_BOUGE_MIN", "4")) * 60
+AGE_MAX = float(os.environ.get("AGE_MAX_MIN", "5")) * 60
+
+# SUIVIS reste le seul privilege absolu : ces produits sont relus a CHAQUE
+# run, en plus du lot. Deux ou trois suffisent.
 SUIVIS = {int(x) for x in os.environ.get("SUIVIS", "").replace(";", ",")
           .split(",") if x.strip().isdigit()}
 
@@ -597,7 +663,13 @@ def reindexer(ordres):
 
 
 def traiter(kind, book, ordres, agg, volp, ts):
-    """Compare le carnet recu a ce qu'on avait, et en tire les ventes."""
+    """Compare le carnet recu a ce qu'on avait, et en tire les ventes.
+
+    Renvoie le nombre d'EVENEMENTS observes : offres apparues, entamees ou
+    disparues. C'est la mesure d'activite qui pilote la cadence de lecture —
+    sans dimension, donc comparable entre l'electricite et les boules de
+    Noel, et directement liee a ce qui abime la deduction du front."""
+    evts = 0
     h = heure_de(ts)
     par_q = {}
     for x in book:
@@ -682,6 +754,7 @@ def traiter(kind, book, ordres, agg, volp, ts):
             x = neuf.get(oid)
             if x is None:
                 # offre entierement disparue
+                evts += 1
                 ordres.pop(oid, None)
                 PAR_KIND.get(kind, set()).discard(oid)
                 if av["p"] <= front + 1e-9:
@@ -719,6 +792,8 @@ def traiter(kind, book, ordres, agg, volp, ts):
                 continue
             qt = float(x["quantity"])
             delta = av["qt"] - qt
+            if delta:
+                evts += 1
             if delta > 0:
                 # un vendeur ne peut pas reduire son offre : c'est une vente
                 vendre(delta, av["p"], kind, q, h, agg, volp, certain=True)
@@ -736,6 +811,7 @@ def traiter(kind, book, ordres, agg, volp, ts):
             oid = str(x["id"])
             if oid in ordres:
                 continue
+            evts += 1
             b = agg.get((h, kind, q))
             if b is not None:
                 b["pose"] += float(x["quantity"])
@@ -746,6 +822,8 @@ def traiter(kind, book, ordres, agg, volp, ts):
                 "p": float(x["price"]), "qt": float(x["quantity"]),
                 # la vraie date de mise en vente, donnee par le jeu
                 "depuis": iso(x.get("posted")) or ts, "passage": ts, "delta": ""}
+
+    return evts
 
 
 def traiter_ticker(tk, pxh, instant, ts):
@@ -849,42 +927,150 @@ def barre(fait, total, largeur=24):
     return "\u2588" * n + "\u2591" * (largeur - n)
 
 
-def lot_a_lire(kinds, dernier, taille=None):
-    """Les LOT produits qui viennent APRES `dernier`, en refermant la boucle.
+def choisir(kinds, etat, taille, maintenant):
+    """Qui lire, en TROIS RANGS stricts. Le run est toujours rempli : il n'y
+    a jamais d'attente, seulement un ordre.
 
-    On memorise un NUMERO de produit, pas un rang : si le jeu ajoute ou
-    retire une ressource entre deux runs, le tour ne se decale pas et aucun
-    produit ne se fait sauter."""
-    if not kinds:
-        return []
-    if dernier is None:
-        i = 0
-    elif dernier in kinds:
-        i = (kinds.index(dernier) + 1) % len(kinds)
+      RANG 1  age >= AGE_MAX          le plafond, absolu. On ne perd de vue
+                                      aucun produit, quoi qu'il arrive.
+      RANG 2  a bouge et age >= AGE_BOUGE   le flux qu'on veut capter.
+      RANG 3  tout le reste, par score = (debit + PLANCHER) x age.
+
+    POURQUOI DES RANGS ET PAS UN TRI PAR RETARD
+    Trier tout le monde par "combien de retard sur mon echeance" donne la
+    priorite aux volatils : leur echeance est plus courte (AGE_BOUGE), donc
+    ils accumulent du retard plus vite. Un produit qui bouge a 4 min 40
+    (40 s de retard sur 4 min) passerait devant un produit a 5 min 10 (10 s
+    de retard sur 5 min). Une dizaine de volatils tourneraient en boucle
+    pendant que les autres s'entassent au plafond. Le rang 1 rend cela
+    impossible : le plafond passe TOUJOURS avant le flux.
+
+    ANTICIPATION
+    On ne prend pas un produit quand il a depasse son echeance, mais quand
+    il va la depasser avant qu'on ait une nouvelle occasion de le lire —
+    d'ou la marge, calee sur deux intervalles de run et mesuree en direct.
+    Sans elle, on arriverait systematiquement en retard d'un run."""
+    debit = etat.get("debit") or {}
+    vu = etat.get("vu") or {}
+    prix, prix_lu = etat.get("prix") or {}, etat.get("prix_lu") or {}
+    marge = 2 * float(etat.get("intervalle_run") or 20)
+
+    r1, r2, r3 = [], [], []
+    for k in kinds:
+        c = str(k)
+        t_vu = float(vu.get(c, 0) or 0)
+        age = (maintenant - t_vu) if t_vu else 1e9      # jamais lu : prioritaire
+        d = float(debit.get(c, 0) or 0)
+        p, p0 = prix.get(c), prix_lu.get(c)
+        bouge = (p is not None and p0 is not None
+                 and abs(float(p) - float(p0)) > 1e-9)
+        if age >= AGE_MAX - marge:
+            r1.append((age, d, k))
+        elif bouge and age >= AGE_BOUGE - marge:
+            r2.append((age, d, k))
+        else:
+            score = (d + PLANCHER) * (age / 60.0) * (BONUS_TICKER if bouge else 1)
+            r3.append((score, age, k))
+    # dans chaque rang : le plus vieux d'abord ; a age egal, le plus actif
+    r1.sort(reverse=True); r2.sort(reverse=True); r3.sort(reverse=True)
+    choix = [k for _, _, k in r1] + [k for _, _, k in r2] + [k for _, _, k in r3]
+    return choix[:min(taille, len(kinds))]
+
+
+def faisabilite(kinds, etat, bouges):
+    """Les echeances demandees tiennent-elles dans le debit disponible ?
+
+    Une echeance n'est pas un souhait : c'est une charge. Exiger une lecture
+    toutes les T minutes pour N produits coute N/T lectures par minute. Si
+    la somme depasse ce que la chaine sait faire, la promesse est fausse et
+    il vaut mieux le dire que le decouvrir dans les donnees."""
+    n = len(kinds)
+    cap = None
+    if etat.get("cycles_faits"):
+        cap = n / (etat["total_sec"] / etat["cycles_faits"] / 60.0)
+    # les produits en mouvement sont tenus a AGE_BOUGE, les autres a AGE_MAX
+    besoin = (bouges / (AGE_BOUGE / 60.0)
+              + max(n - bouges, 0) / (AGE_MAX / 60.0))
+    return {"cap": cap, "besoin": besoin,
+            "tient": cap is None or besoin <= cap,
+            "marge": (cap - besoin) if cap else None}
+
+
+def stats_collecte(kinds, etat, maintenant):
+    """Ou en est la collecte des 142, en une passe.
+
+    C'est le tableau de bord du selecteur : si l'allocation derape, c'est
+    ici que ca se voit — un age median qui gonfle, une queue de produits
+    oublies, ou des mouvements signales que l'on n'arrive plus a suivre."""
+    vu = etat.get("vu") or {}
+    prix, prix_lu = etat.get("prix") or {}, etat.get("prix_lu") or {}
+    ages, bouges, retard, jamais = [], 0, [], 0
+    for k in kinds:
+        c = str(k)
+        if not vu.get(c):
+            jamais += 1
+            continue
+        age = maintenant - float(vu[c])
+        ages.append((age, k))
+        p, p0 = prix.get(c), prix_lu.get(c)
+        if p is not None and p0 is not None and abs(float(p) - float(p0)) > 1e-9:
+            bouges += 1
+            if age >= AGE_BOUGE:
+                retard.append((age, k))
+    ages.sort()
+    tranches = [("moins de 1 min", 0, 60), ("1 a 3 min", 60, 180),
+                ("3 a 5 min", 180, 300), ("5 a 10 min", 300, 600),
+                ("plus de 10 min", 600, float("inf"))]
+    seaux = [(nom, sum(1 for a, _ in ages if a0 <= a < a1))
+             for nom, a0, a1 in tranches]
+    med = ages[len(ages) // 2][0] if ages else 0
+    return {"ages": ages, "median": med, "seaux": seaux, "jamais": jamais,
+            "vieux": ages[-1] if ages else (0, None),
+            "bouges": bouges, "retard": sorted(retard, reverse=True)}
+
+
+def noter_lecture(etat, k, evts, maintenant):
+    """Met a jour le debit du produit apres l'avoir lu.
+
+    Moyenne mobile exponentielle : le dernier releve pese MEMOIRE, le passe
+    le reste. Assez reactif pour suivre un reveil de marche, assez lent pour
+    ne pas s'emballer sur une lecture creuse."""
+    c = str(k)
+    vu = etat.setdefault("vu", {})
+    debit = etat.setdefault("debit", {})
+    ecoule = max((maintenant - float(vu.get(c, 0) or 0)) / 60.0, 1 / 60.0)
+    mesure = evts / ecoule                                # evenements par minute
+    if c in debit and vu.get(c):
+        debit[c] = round(MEMOIRE * mesure + (1 - MEMOIRE) * float(debit[c]), 4)
     else:
-        # le produit memorise n'existe plus : on reprend au suivant dans l'ordre
-        i = sum(1 for k in kinds if k <= dernier) % len(kinds)
-    n = min(taille if taille else LOT, len(kinds))
-    return [kinds[(i + j) % len(kinds)] for j in range(n)]
+        debit[c] = round(mesure, 4)                       # premiere fois
+    vu[c] = round(maintenant, 1)
+    # le prix du ticker au moment de cette lecture : reference pour savoir,
+    # au prochain tour, si quelque chose a bouge depuis
+    p = (etat.get("prix") or {}).get(c)
+    if p is not None:
+        etat.setdefault("prix_lu", {})[c] = p
 
 
 def main():
     debut = time.time()
     ordres, agg, volp, pxh, instant, etat = charger_live()
-    dernier = etat.get("dernier")
     reindexer(ordres)
 
     # --- ce run fait-il le releve de prix ? --------------------------
-    # Un run sur TICKER_RUNS le fait. Les autres economisent cette requete
-    # et lisent un carnet de plus : le budget reste le meme, la moisson est
-    # plus grande. Pour s'en passer, le run doit connaitre la liste des
-    # produits sans l'avoir demandee — elle est donc mise en cache dans
-    # l'etat, ou elle ne change qu'exceptionnellement.
     etat["run_no"] = etat.get("run_no", 0) + 1
+    # L'intervalle reel entre deux runs, mesure en direct : il sert de marge
+    # d'anticipation au selecteur. Moyenne mobile, pour absorber un run lent
+    # sans se laisser deregler par lui.
+    prec = float(etat.get("dernier_run") or 0)
+    if prec and 1 < debut - prec < 600:
+        etat["intervalle_run"] = round(0.3 * (debut - prec)
+                                       + 0.7 * float(etat.get("intervalle_run")
+                                                     or (debut - prec)), 1)
+    etat["dernier_run"] = round(debut, 1)
     en_cache = [int(k) for k in etat.get("kinds", [])]
     fait_ticker = (TICKER_RUNS <= 1 or etat["run_no"] % TICKER_RUNS == 1
                    or not en_cache)
-
     if fait_ticker:
         tk = fetch(TICKER, tries=3, cadence=True)
         kinds = (sorted({int(r["kind"]) for r in tk}) if tk
@@ -895,60 +1081,72 @@ def main():
     else:
         kinds = en_cache
     etat["kinds"] = kinds
+    # le prix courant de chaque produit, garde pour le selecteur du prochain
+    # run : c'est lui qui dit "ca a bouge depuis ta derniere lecture"
+    etat["prix"] = {str(k): v["p"] for k, v in instant.items() if v.get("p")}
 
-    # la place liberee par le ticker absent va a un carnet de plus
+    if not etat.get("cycle"):
+        etat.update(cycle=1, cycle_debut=debut, cycles_faits=0,
+                    total_sec=0.0, dernier_cycle_sec=None)
+
+    # --- qui lit-on ? -------------------------------------------------
     taille = LOT + (0 if fait_ticker else 1)
-    lot = lot_a_lire(kinds, dernier, taille)
-    # les suivis passent a chaque run, en plus du lot du moment
+    lot = choisir(kinds, etat, taille, debut)
     sup = [k for k in sorted(SUIVIS) if k in kinds and k not in lot]
     a_lire = sup + lot
     AVANCEE["total"] = len(a_lire)
 
-    # --- ou en est-on dans le cycle ? -------------------------------
-    # Le rang du premier produit du lot dit tout : combien de lots avant
-    # lui, combien apres. Le run n'a rien a memoriser de plus que le
-    # curseur pour pouvoir l'annoncer.
-    # a l'equilibre un run lit LOT carnets, plus un de rab quand il saute
-    # le releve de prix : c'est cette moyenne qui donne la longueur du cycle
-    moy_lot = LOT + (TICKER_RUNS - 1) / TICKER_RUNS
-    runs_par_cycle = max(1, round(len(kinds) / moy_lot)) if LOT else 1
-    rang = kinds.index(lot[0]) if lot else 0
+    # --- ou en est-on du cycle ? --------------------------------------
+    # Un cycle = tous les produits lus au moins une fois. Avec un choix
+    # adaptatif il n'y a plus de "lot 3 sur 16" : on compte simplement
+    # combien de produits ont ete vus depuis le debut du cycle. L'info est
+    # deja dans `vu`, rien de plus a memoriser.
+    vu = etat.get("vu") or {}
+    debut_cycle = float(etat.get("cycle_debut", debut))
+    faits = sum(1 for k in kinds if float(vu.get(str(k), 0) or 0) >= debut_cycle)
 
-    # Le cycle, lui, ne se deduit pas du curseur : 142 n'est pas un multiple
-    # de 9, donc les lots ne retombent jamais au meme endroit d'un tour a
-    # l'autre. On COMPTE donc les produits parcourus depuis le debut du
-    # cycle, et le cycle se referme des qu'on a fait le tour.
-    if not etat.get("cycle"):
-        etat.update(cycle=1, cycle_debut=debut, faits=0, cycles_faits=0,
-                    total_sec=0.0, dernier_cycle_sec=None)
-    etat.setdefault("faits", 0)
-    no_lot = etat["faits"] // LOT + 1 if LOT else 1
-
-    # --- le budget du run --------------------------------------------
     budget = len(a_lire) + (1 if fait_ticker else 0)
-    print(f"{len(kinds)} produits au total · {len(lot)} carnets ce run "
-          f"({'avec' if fait_ticker else 'sans'} releve de prix), "
-          f"~{runs_par_cycle} runs par cycle")
-    fin = kinds.index(lot[-1]) + 1 if lot else 0
-    # le lot peut chevaucher la fin de la liste : on le dit au lieu
-    # d'annoncer un "produit 144 sur 142" qui n'existe pas
-    situe = (f"produits {rang + 1} a {fin} sur {len(kinds)}" if fin >= rang + 1
-             else f"produits {rang + 1} a {len(kinds)} puis 1 a {fin} "
-                  f"(la boucle se referme ici)")
-    print(f"  lot {no_lot}/{runs_par_cycle} du cycle · {situe}")
-    print(f"  ce run lit : {', '.join(map(str, lot))}"
-          + (f"  (+ suivis : {', '.join(map(str, sup))})" if sup else ""))
+    debit = etat.get("debit") or {}
+    print(f"{len(kinds)} produits · {len(lot)} carnets ce run "
+          f"({'avec' if fait_ticker else 'sans'} releve de prix) · "
+          f"cycle {etat['cycle']} a {faits}/{len(kinds)}")
+    detail = ", ".join(
+        f"{k}({float(debit.get(str(k), 0) or 0):.1f}/min"
+        + (",age " + duree_texte(debut - float((vu or {}).get(str(k), 0) or 0))
+           if vu.get(str(k)) else ",jamais lu") + ")"
+        for k in lot)
+    print(f"  choisis : {detail}")
+    if sup:
+        print(f"  + suivis : {', '.join(map(str, sup))}")
     if budget <= QUOTA[0]:
         print(f"  budget : {budget} requetes pour un quota de {QUOTA[0]} par "
               f"{FENETRE:.0f} s — aucune attente prevue")
     else:
         cout = (budget - QUOTA[0]) * FENETRE / QUOTA[0] + FENETRE
-        print(f"  ! budget : {budget} requetes pour un quota de {QUOTA[0]} par "
-              f"{FENETRE:.0f} s")
-        print(f"  ! ce run va donc ATTENDRE ~{cout:.0f} s, facturees pour rien."
-              f" Baisser LOT a {max(1, QUOTA[0] - 1 - len(sup))} supprime "
-              f"l'attente sans rien collecter de moins par minute.")
+        print(f"  ! budget : {budget} requetes pour un quota de {QUOTA[0]} — "
+              f"~{cout:.0f} s d'attente facturees pour rien. Baisser LOT a "
+              f"{max(1, QUOTA[0] - 1 - len(sup))}.")
 
+    # Photo AVANT la collecte : c'est l'etat que le selecteur a vu, donc
+    # celui qui juge sa decision. La prendre apres flatterait le bilan.
+    av = stats_collecte(kinds, etat, debut)
+    fais = faisabilite(kinds, etat, av["bouges"])
+    if fais["cap"] and not fais["tient"]:
+        print(f"  ! ECHEANCES INTENABLES : elles exigent "
+              f"{fais['besoin']:.1f} lectures/min, la chaine en fait "
+              f"{fais['cap']:.1f}. Il manque {-fais['marge']:.1f}/min.")
+        print(f"  ! remonter AGE_MAX_MIN (actuellement {AGE_MAX/60:.0f}) ou "
+              f"AGE_BOUGE_MIN (actuellement {AGE_BOUGE/60:.0f}), "
+              f"sinon les retards sont structurels.")
+    if av["retard"]:
+        pire = av["retard"][0]
+        etat["retard_max_sec"] = max(float(etat.get("retard_max_sec", 0) or 0),
+                                     round(pire[0]))
+        print(f"  ! {len(av['retard'])} produit(s) en mouvement au-dela de "
+              f"l'echeance de {AGE_BOUGE/60:.0f} min — le pire : produit "
+              f"{pire[1]}, {duree_texte(pire[0])}")
+
+    # --- la collecte ---------------------------------------------------
     for k in a_lire:
         if time.time() - debut > DUREE:
             print("  ! plafond de duree atteint, on ferme ici")
@@ -957,43 +1155,40 @@ def main():
         book = fetch(BOOK % (REALM, k), tries=2, cadence=True)
         if book:
             t0 = time.time()
-            traiter(k, book, ordres, agg, volp, ts)
+            evts = traiter(k, book, ordres, agg, volp, ts)
             CHRONO["traitement"] += time.time() - t0
+            noter_lecture(etat, k, evts, time.time())
             AVANCEE["lues"] += 1
         else:
-            # on n'insiste pas : le curseur avance quand meme, ce produit
-            # sera relu au prochain cycle. Bloquer le tour sur une ressource
-            # indisponible affamerait les 141 autres.
+            # Lecture ratee : on ne touche NI a `vu` NI au debit. Son age
+            # continue donc de grandir et il repassera en tete tout seul —
+            # pas besoin de file d'attente pour les echecs.
             print(f"  carnet {k} indisponible, passe au suivant")
 
-    # Un second releve de prix, mais SEULEMENT s'il est gratuit : le run a
-    # dure plus d'une minute ET il reste une place dans la fenetre. Sinon on
-    # s'en passe — un point de prix de plus ne vaut pas une minute de runner.
     if time.time() - debut >= TICKER_SEC and slot_libre():
         tkf = fetch(TICKER, tries=1, cadence=True)
         if tkf:
             traiter_ticker(tkf, pxh, instant, stamp())
             AVANCEE["tickers"] += 1
+            etat["prix"] = {str(k): v["p"] for k, v in instant.items() if v.get("p")}
 
-    # Le curseur avance au dernier produit DU LOT, lu ou non. Les suivis ne
-    # comptent pas : ils sont hors tour.
-    nouveau = lot[-1] if lot else dernier
-    etat["dernier"] = nouveau
-    etat["faits"] = etat.get("faits", 0) + len(lot)
+    etat["dernier"] = lot[-1] if lot else etat.get("dernier")
 
-    # --- le cycle s'est-il referme sur ce run ? ----------------------
-    cycle_boucle = etat["faits"] >= len(kinds)
+    # --- le cycle s'est-il referme ? ----------------------------------
+    vu = etat.get("vu") or {}
+    faits = sum(1 for k in kinds if float(vu.get(str(k), 0) or 0) >= debut_cycle)
+    cycle_boucle = faits >= len(kinds)
     duree_cycle = None
     if cycle_boucle:
-        duree_cycle = time.time() - etat.get("cycle_debut", debut)
+        duree_cycle = time.time() - debut_cycle
         etat["dernier_cycle_sec"] = round(duree_cycle)
         etat["cycles_faits"] = etat.get("cycles_faits", 0) + 1
         etat["total_sec"] = etat.get("total_sec", 0.0) + duree_cycle
         etat["cycle"] = etat.get("cycle", 1) + 1
         etat["cycle_debut"] = time.time()
-        etat["cycle_debut_iso"] = stamp()      # lisible a l'oeil nu
-        # le trop-plein est reporte : rien ne se perd au passage du tour
-        etat["faits"] = etat["faits"] - len(kinds)
+        etat["cycle_debut_iso"] = stamp()
+        etat["retard_max_sec"] = 0          # le bilan du cycle repart propre
+        faits = 0
 
     t0 = time.time()
     fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat, final=True)
@@ -1001,78 +1196,107 @@ def main():
 
     ecoule = time.time() - debut
     complet = AVANCEE["lues"] == len(a_lire)
-    verdict = ("lot complet" if complet
-               else f"lot INCOMPLET, {len(a_lire) - AVANCEE['lues']} carnet(s) "
-                    f"manque(nt) — ils repasseront au prochain cycle")
     print(f"fin de run en {ecoule:.0f} s : {AVANCEE['lues']}/{len(a_lire)} "
-          f"carnets lus ({verdict}), {AVANCEE['tickers']} releves de prix, "
-          f"{N429[0]} refus")
-    print(f"  lot {no_lot}/{runs_par_cycle} termine · curseur -> {nouveau} · "
-          f"le run suivant reprend au produit "
-          f"{lot_a_lire(kinds, nouveau)[0] if kinds else '?'}")
+          f"carnets lus ({'lot complet' if complet else 'lot INCOMPLET'}), "
+          f"{AVANCEE['tickers']} releves de prix, {N429[0]} refus")
     if cycle_boucle:
         print(f"  CYCLE {etat['cycle'] - 1} BOUCLE : les {len(kinds)} produits "
-              f"ont ete relus en {duree_texte(duree_cycle)}")
+              f"ont tous ete lus, en {duree_texte(duree_cycle)}")
     print("  " + chrono_texte(ecoule))
 
-    # --- l'etiquette du run SUIVANT ----------------------------------
-    # GitHub affiche `run-name` dans la liste des executions. Comme c'est
-    # NOUS qui declenchons le run suivant, on peut lui donner son titre a
-    # l'avance : la page Actions devient lisible sans ouvrir un seul run.
-    suite = lot_a_lire(kinds, nouveau)
-    if suite:
-        r0 = kinds.index(suite[0]) + 1
-        r1 = kinds.index(suite[-1]) + 1
-        etendue = (f"{r0}-{r1}" if r1 >= r0
-                   else f"{r0}-{len(kinds)} puis 1-{r1}")
-        with open(ETIQUETTE, "w") as fh:
-            fh.write(f"cycle {etat['cycle']} · lot "
-                     f"{etat['faits'] // LOT + 1}/{runs_par_cycle} · "
-                     f"produits {etendue}\n")
+    # --- ou en est la collecte des 142 ? -------------------------------
+    ap = stats_collecte(kinds, etat, time.time())
+    dbt = etat.get("debit") or {}
+    actifs = sorted(kinds, key=lambda k: -float(dbt.get(str(k), 0) or 0))[:5]
+    vieux, attente = ap["vieux"][1], ap["vieux"][0]
+    print("  fraicheur des 142 : " + " · ".join(
+        f"{nom} {n}" for nom, n in ap["seaux"] if n)
+        + (f" · jamais lus {ap['jamais']}" if ap["jamais"] else ""))
+    print(f"  age median {duree_texte(ap['median'])} · le plus vieux : produit "
+          f"{vieux} ({duree_texte(attente)}, plafond {AGE_MAX/60:.0f} min)")
+    print(f"  en mouvement selon le ticker : {ap['bouges']}/{len(kinds)}"
+          f" · dont {len(ap['retard'])} au-dela de l'echeance")
+    print("  les plus actifs : " + ", ".join(
+        f"{k} ({float(dbt.get(str(k), 0) or 0):.1f} evt/min)" for k in actifs))
 
-    # --- le resume sur la PAGE du run --------------------------------
-    # Lisible sans deplier les logs. C'est ici que vit le tableau de bord.
+    # --- l'etiquette du run SUIVANT ------------------------------------
+    suite = choisir(kinds, etat, taille, time.time())
+    if suite:
+        with open(ETIQUETTE, "w") as fh:
+            fh.write(f"cycle {etat['cycle']} · {faits}/{len(kinds)} lus · "
+                     f"suivants {', '.join(map(str, suite[:5]))}"
+                     f"{'...' if len(suite) > 5 else ''}\n")
+
+    # --- le resume sur la PAGE du run ----------------------------------
     resume = os.environ.get("GITHUB_STEP_SUMMARY")
     if resume:
-        sante = "OK" if complet and not N429[0] else "a verifier"
-        fait, total = etat.get("faits", 0), len(kinds)
-        depuis = time.time() - etat.get("cycle_debut", debut)
+        sante = ("a verifier" if (not complet or N429[0] or ap["retard"]
+                                  or not fais["tient"]) else "OK")
+        total = len(kinds)
+        depuis = time.time() - float(etat.get("cycle_debut", debut))
         moy = (etat["total_sec"] / etat["cycles_faits"]
                if etat.get("cycles_faits") else None)
-        # estimation de la fin du cycle : le rythme observe sur CE cycle,
-        # extrapole aux produits qui restent. Pas de modele, juste une
-        # regle de trois sur ce qu'on vient de mesurer.
-        reste = None
-        if fait and not cycle_boucle:
-            reste = depuis / fait * (total - fait)
+        reste = depuis / faits * (total - faits) if faits and not cycle_boucle else None
+        cap = total / (moy / 60) if moy else None      # carnets par minute
         with open(resume, "a") as fh:
             fh.write(
-                f"## Cycle {etat['cycle']} · lot {no_lot}/{runs_par_cycle}"
-                f" — {sante}\n\n"
-                f"`{barre(fait, total)}` **{fait}/{total}** produits "
-                f"({fait * 100 // max(total, 1)} %)\n\n"
-                f"| | |\n|---|---|\n"
-                f"| Ce lot | {situe} |\n"
-                f"| Carnets lus | {AVANCEE['lues']}/{len(a_lire)}"
-                f"{'' if complet else ' — INCOMPLET'} |\n"
-                f"| Releves de prix | {AVANCEE['tickers']} |\n"
-                f"| Refus du serveur | {N429[0]} |\n"
-                f"| Duree de ce run | {ecoule:.0f} s dont "
-                f"{CHRONO['attente']:.0f} s d'attente quota |\n"
-                f"| Cycle en cours depuis | {duree_texte(depuis)} |\n"
-                + (f"| Fin du cycle estimee dans | {duree_texte(reste)} |\n"
-                   if reste else "")
-                + (f"| Cycle precedent | {duree_texte(etat['dernier_cycle_sec'])} |\n"
-                   if etat.get("dernier_cycle_sec") else "")
-                + (f"| Moyenne sur {etat['cycles_faits']} cycle(s) | "
-                   f"{duree_texte(moy)} |\n" if moy else "")
-                + f"| Curseur | apres le produit {nouveau} |\n\n"
-                + (f"> Le cycle {etat['cycle'] - 1} vient de se refermer en "
-                   f"{duree_texte(duree_cycle)}.\n\n" if cycle_boucle else ""))
+                f"## Cycle {etat['cycle']} — {sante}\n\n"
+                f"`{barre(faits, total)}` **{faits}/{total}** produits lus dans "
+                f"ce cycle · en cours depuis {duree_texte(depuis)}"
+                + (f", fin estimee dans {duree_texte(reste)}" if reste else "")
+                + "\n\n")
 
-    # Le temoin : sa presence dit au workflow que ce run est alle au bout.
-    # Sans lui, pas de relance — c'est ce qui empeche une boucle de
-    # plantages instantanes de tourner a vide.
+            # --- ou en est-on sur les 142 ? ---------------------------
+            fh.write("### Fraicheur des 142 carnets\n\n| age | produits |\n"
+                     "|---|---|\n")
+            for nom, n in ap["seaux"]:
+                fh.write(f"| {nom} | **{n}** {barre(n, total, 14) if n else ''} |\n")
+            if ap["jamais"]:
+                fh.write(f"| jamais lus | **{ap['jamais']}** |\n")
+            fh.write(f"\nAge median **{duree_texte(ap['median'])}** · le plus "
+                     f"vieux : produit **{vieux}** ({duree_texte(attente)}, "
+                     f"plafond {AGE_MAX/60:.0f} min)\n\n")
+
+            # --- la promesse est-elle tenue ? -------------------------
+            fh.write("### Mouvement et echeance\n\n| | |\n|---|---|\n"
+                     f"| Produits en mouvement (ticker) | {ap['bouges']}/{total} |\n"
+                     f"| Au-dela de l'echeance de {AGE_BOUGE/60:.0f} min | "
+                     + (", ".join(f"produit {k} ({duree_texte(a)})"
+                                  for a, k in ap["retard"][:3])
+                        if ap["retard"] else "aucun") + " |\n"
+                     f"| Pire retard de ce cycle | "
+                     f"{duree_texte(float(etat.get('retard_max_sec', 0) or 0))} |\n"
+                     + (f"| Capacite mesuree | {cap:.1f} carnets/min |\n"
+                        if cap else "")
+                     + (f"| Charge exigee par les echeances | "
+                        f"{fais['besoin']:.1f} lectures/min "
+                        + ("— **ca ne tient pas**, il manque "
+                           f"{-fais['marge']:.1f}/min"
+                           if not fais["tient"] else
+                           f"— il reste {fais['marge']:.1f}/min de marge")
+                        + " |\n" if fais["cap"] else "")
+                     + "\n")
+
+            # --- ce run --------------------------------------------------
+            fh.write("### Ce run\n\n| | |\n|---|---|\n"
+                     f"| Carnets lus | {', '.join(map(str, lot))} |\n"
+                     f"| Reussite | {AVANCEE['lues']}/{len(a_lire)}"
+                     f"{'' if complet else ' — INCOMPLET'} |\n"
+                     f"| Releves de prix | {AVANCEE['tickers']} |\n"
+                     f"| Refus du serveur | {N429[0]} |\n"
+                     f"| Duree | {ecoule:.0f} s |\n"
+                     f"| Les plus actifs | "
+                     + ", ".join(f"{k} ({float(dbt.get(str(k),0) or 0):.1f}/min)"
+                                 for k in actifs) + " |\n"
+                     + (f"| Cycle precedent | "
+                        f"{duree_texte(etat['dernier_cycle_sec'])} |\n"
+                        if etat.get("dernier_cycle_sec") else "")
+                     + (f"| Moyenne sur {etat['cycles_faits']} cycle(s) | "
+                        f"{duree_texte(moy)} |\n" if moy else "") + "\n")
+            if cycle_boucle:
+                fh.write(f"> Le cycle {etat['cycle'] - 1} vient de se refermer "
+                         f"en {duree_texte(duree_cycle)}.\n\n")
+
     with open(TEMOIN, "w") as fh:
         fh.write(stamp() + "\n")
 
