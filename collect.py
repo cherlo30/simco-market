@@ -113,8 +113,10 @@ UA = "Mozilla/5.0 (compatible; simco-market-logger/3.0)"
 # On ne peut donc pas aller plus vite — seulement arreter de payer de
 # l'attente en plus du plancher.
 LOT = int(os.environ.get("LOT", "9"))                    # carnets par run
-CURSEUR = "curseur.txt"                                  # memoire du rang
-TEMOIN = "collecte_ok"                                   # preuve de fin propre
+CURSEUR = "curseur.txt"     # le rang, en clair, pour un oeil humain
+ETAT = "etat.json"          # le meme rang + de quoi raconter le cycle
+TEMOIN = "collecte_ok"      # preuve, pour le workflow, d'une fin propre
+ETIQUETTE = "prochain.txt"  # le nom a donner au run suivant, dans Actions
 
 # Garde-fou : si quelque chose se bloque (reseau qui pend, quota qui
 # s'effondre), le run s'arrete de lui-meme au lieu de manger le timeout du
@@ -145,6 +147,13 @@ FENETRE = float(os.environ.get("FENETRE", "60"))  # ...par tranche de X secondes
 QUOTA_MIN = int(os.environ.get("QUOTA_MIN", "5"))
 MARGE = float(os.environ.get("MARGE", "0.3"))     # petit coussin de securite
 TICKER_SEC = float(os.environ.get("TICKER_SEC", "60"))   # un ticker par minute
+
+# Le releve de prix ne sert a rien s'il est fait deux fois dans la meme
+# demi-minute : les 142 prix ne bougent pas si vite. Le faire un run sur
+# TICKER_RUNS libere une place de quota pour un carnet de plus, sans rien
+# perdre de mesurable. A ~15 s par run, 2 donne un releve toutes les 30 s
+# et 4 un releve par minute.
+TICKER_RUNS = max(1, int(os.environ.get("TICKER_RUNS", "2")))
 
 # Le tour est desormais strictement sequentiel : chaque produit est lu une
 # fois par cycle, ni plus ni moins. SUIVIS reste le seul privilege : ces
@@ -399,7 +408,7 @@ def charger_live():
     r = git("fetch", "--depth=1", "--force", "origin", "live")
     if r.returncode != 0:
         print("  branche live absente — premier demarrage, on repart a neuf")
-        return {}, {}, {}, {}, {}, None
+        return {}, {}, {}, {}, {}, {}
     def lire(nom, entete):
         s = git("show", f"FETCH_HEAD:{nom}")
         return lire_csv(s.stdout, entete) if s.returncode == 0 else []
@@ -433,19 +442,31 @@ def charger_live():
     for k, p, sens, psg in lire("prix.csv", EN_INSTANT):
         instant[int(k)] = {"p": flt(p), "sens": sens, "passage": psg}
 
-    # le curseur : le dernier produit lu par le run precedent. C'est tout ce
-    # qu'il faut pour reprendre le tour exactement ou il en etait.
-    dernier = None
-    s = git("show", f"FETCH_HEAD:{CURSEUR}")
-    if s.returncode == 0 and s.stdout.strip().lstrip("-").isdigit():
-        dernier = int(s.stdout.strip())
+    # L'etat : le curseur, plus ce qu'il faut pour raconter le cycle en
+    # cours (son numero, son heure de depart, combien de produits deja
+    # parcourus, la duree des cycles precedents). Un run seul ne sait rien
+    # du cycle ; c'est ce fichier qui fait la memoire longue.
+    etat = {}
+    s = git("show", f"FETCH_HEAD:{ETAT}")
+    if s.returncode == 0:
+        try:
+            etat = json.loads(s.stdout) or {}
+        except Exception:
+            etat = {}
+    if "dernier" not in etat:
+        # rattrapage depuis l'ancien curseur.txt, pour que le passage a
+        # etat.json ne fasse pas repartir le tour de zero
+        s = git("show", f"FETCH_HEAD:{CURSEUR}")
+        if s.returncode == 0 and s.stdout.strip().lstrip("-").isdigit():
+            etat["dernier"] = int(s.stdout.strip())
 
+    dernier = etat.get("dernier")
     print(f"  memoire reprise : {len(ordres)} ordres, "
           f"{len(agg)} heures en cours, {len(volp)} paliers de prix, "
           f"{len(pxh)} heures de prix"
           + (f", curseur apres le produit {dernier}" if dernier is not None
              else ", pas de curseur (on repart du debut)"))
-    return ordres, agg, volp, pxh, instant, dernier
+    return ordres, agg, volp, pxh, instant, etat
 
 
 def flt(x):
@@ -765,7 +786,28 @@ def lignes_ordres(ordres):
 
 # ------------------------------------------------------------------ boucle
 
-def lot_a_lire(kinds, dernier):
+def duree_texte(sec):
+    """Une duree que l'oeil lit sans compter les zeros."""
+    if sec is None:
+        return "—"
+    sec = int(sec)
+    if sec < 60:
+        return f"{sec} s"
+    if sec < 3600:
+        return f"{sec // 60} min {sec % 60:02d} s"
+    return f"{sec // 3600} h {(sec % 3600) // 60:02d}"
+
+
+def barre(fait, total, largeur=24):
+    """Une barre de progression en caracteres, parce qu'un pourcentage seul
+    ne se compare pas d'un coup d'oeil d'un run a l'autre."""
+    if total <= 0:
+        return ""
+    n = max(0, min(largeur, round(fait / total * largeur)))
+    return "\u2588" * n + "\u2591" * (largeur - n)
+
+
+def lot_a_lire(kinds, dernier, taille=None):
     """Les LOT produits qui viennent APRES `dernier`, en refermant la boucle.
 
     On memorise un NUMERO de produit, pas un rang : si le jeu ajoute ou
@@ -780,21 +822,41 @@ def lot_a_lire(kinds, dernier):
     else:
         # le produit memorise n'existe plus : on reprend au suivant dans l'ordre
         i = sum(1 for k in kinds if k <= dernier) % len(kinds)
-    return [kinds[(i + j) % len(kinds)] for j in range(min(LOT, len(kinds)))]
+    n = min(taille if taille else LOT, len(kinds))
+    return [kinds[(i + j) % len(kinds)] for j in range(n)]
 
 
 def main():
     debut = time.time()
-    ordres, agg, volp, pxh, instant, dernier = charger_live()
+    ordres, agg, volp, pxh, instant, etat = charger_live()
+    dernier = etat.get("dernier")
     reindexer(ordres)
 
-    tk = fetch(TICKER, tries=3, cadence=True)
-    kinds = sorted({int(r["kind"]) for r in tk}) if tk else list(range(1, 156))
-    if tk:
-        traiter_ticker(tk, pxh, instant, stamp())
-        AVANCEE["tickers"] += 1
+    # --- ce run fait-il le releve de prix ? --------------------------
+    # Un run sur TICKER_RUNS le fait. Les autres economisent cette requete
+    # et lisent un carnet de plus : le budget reste le meme, la moisson est
+    # plus grande. Pour s'en passer, le run doit connaitre la liste des
+    # produits sans l'avoir demandee — elle est donc mise en cache dans
+    # l'etat, ou elle ne change qu'exceptionnellement.
+    etat["run_no"] = etat.get("run_no", 0) + 1
+    en_cache = [int(k) for k in etat.get("kinds", [])]
+    fait_ticker = (TICKER_RUNS <= 1 or etat["run_no"] % TICKER_RUNS == 1
+                   or not en_cache)
 
-    lot = lot_a_lire(kinds, dernier)
+    if fait_ticker:
+        tk = fetch(TICKER, tries=3, cadence=True)
+        kinds = (sorted({int(r["kind"]) for r in tk}) if tk
+                 else en_cache or list(range(1, 156)))
+        if tk:
+            traiter_ticker(tk, pxh, instant, stamp())
+            AVANCEE["tickers"] += 1
+    else:
+        kinds = en_cache
+    etat["kinds"] = kinds
+
+    # la place liberee par le ticker absent va a un carnet de plus
+    taille = LOT + (0 if fait_ticker else 1)
+    lot = lot_a_lire(kinds, dernier, taille)
     # les suivis passent a chaque run, en plus du lot du moment
     sup = [k for k in sorted(SUIVIS) if k in kinds and k not in lot]
     a_lire = sup + lot
@@ -804,14 +866,27 @@ def main():
     # Le rang du premier produit du lot dit tout : combien de lots avant
     # lui, combien apres. Le run n'a rien a memoriser de plus que le
     # curseur pour pouvoir l'annoncer.
-    runs_par_cycle = -(-len(kinds) // LOT) if LOT else 1
+    # a l'equilibre un run lit LOT carnets, plus un de rab quand il saute
+    # le releve de prix : c'est cette moyenne qui donne la longueur du cycle
+    moy_lot = LOT + (TICKER_RUNS - 1) / TICKER_RUNS
+    runs_par_cycle = max(1, round(len(kinds) / moy_lot)) if LOT else 1
     rang = kinds.index(lot[0]) if lot else 0
-    no_lot = rang // LOT + 1 if LOT else 1
+
+    # Le cycle, lui, ne se deduit pas du curseur : 142 n'est pas un multiple
+    # de 9, donc les lots ne retombent jamais au meme endroit d'un tour a
+    # l'autre. On COMPTE donc les produits parcourus depuis le debut du
+    # cycle, et le cycle se referme des qu'on a fait le tour.
+    if not etat.get("cycle"):
+        etat.update(cycle=1, cycle_debut=debut, faits=0, cycles_faits=0,
+                    total_sec=0.0, dernier_cycle_sec=None)
+    etat.setdefault("faits", 0)
+    no_lot = etat["faits"] // LOT + 1 if LOT else 1
 
     # --- le budget du run --------------------------------------------
-    budget = len(a_lire) + 1                    # +1 pour le releve de prix
-    print(f"{len(kinds)} produits au total · lot de {LOT} par run, "
-          f"soit {runs_par_cycle} runs pour un cycle complet")
+    budget = len(a_lire) + (1 if fait_ticker else 0)
+    print(f"{len(kinds)} produits au total · {len(lot)} carnets ce run "
+          f"({'avec' if fait_ticker else 'sans'} releve de prix), "
+          f"~{runs_par_cycle} runs par cycle")
     fin = kinds.index(lot[-1]) + 1 if lot else 0
     # le lot peut chevaucher la fin de la liste : on le dit au lieu
     # d'annoncer un "produit 144 sur 142" qui n'existe pas
@@ -861,9 +936,25 @@ def main():
     # Le curseur avance au dernier produit DU LOT, lu ou non. Les suivis ne
     # comptent pas : ils sont hors tour.
     nouveau = lot[-1] if lot else dernier
+    etat["dernier"] = nouveau
+    etat["faits"] = etat.get("faits", 0) + len(lot)
+
+    # --- le cycle s'est-il referme sur ce run ? ----------------------
+    cycle_boucle = etat["faits"] >= len(kinds)
+    duree_cycle = None
+    if cycle_boucle:
+        duree_cycle = time.time() - etat.get("cycle_debut", debut)
+        etat["dernier_cycle_sec"] = round(duree_cycle)
+        etat["cycles_faits"] = etat.get("cycles_faits", 0) + 1
+        etat["total_sec"] = etat.get("total_sec", 0.0) + duree_cycle
+        etat["cycle"] = etat.get("cycle", 1) + 1
+        etat["cycle_debut"] = time.time()
+        etat["cycle_debut_iso"] = stamp()      # lisible a l'oeil nu
+        # le trop-plein est reporte : rien ne se perd au passage du tour
+        etat["faits"] = etat["faits"] - len(kinds)
 
     t0 = time.time()
-    fermer_et_envoyer(ordres, agg, volp, pxh, instant, nouveau, final=True)
+    fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat, final=True)
     CHRONO["envoi"] += time.time() - t0
 
     ecoule = time.time() - debut
@@ -877,24 +968,65 @@ def main():
     print(f"  lot {no_lot}/{runs_par_cycle} termine · curseur -> {nouveau} · "
           f"le run suivant reprend au produit "
           f"{lot_a_lire(kinds, nouveau)[0] if kinds else '?'}")
+    if cycle_boucle:
+        print(f"  CYCLE {etat['cycle'] - 1} BOUCLE : les {len(kinds)} produits "
+              f"ont ete relus en {duree_texte(duree_cycle)}")
     print("  " + chrono_texte(ecoule))
 
-    # Le meme resume, mais sur la PAGE du run GitHub : lisible sans deplier
-    # les logs, et donc lisible d'un coup d'oeil sur la liste des runs.
+    # --- l'etiquette du run SUIVANT ----------------------------------
+    # GitHub affiche `run-name` dans la liste des executions. Comme c'est
+    # NOUS qui declenchons le run suivant, on peut lui donner son titre a
+    # l'avance : la page Actions devient lisible sans ouvrir un seul run.
+    suite = lot_a_lire(kinds, nouveau)
+    if suite:
+        r0 = kinds.index(suite[0]) + 1
+        r1 = kinds.index(suite[-1]) + 1
+        etendue = (f"{r0}-{r1}" if r1 >= r0
+                   else f"{r0}-{len(kinds)} puis 1-{r1}")
+        with open(ETIQUETTE, "w") as fh:
+            fh.write(f"cycle {etat['cycle']} · lot "
+                     f"{etat['faits'] // LOT + 1}/{runs_par_cycle} · "
+                     f"produits {etendue}\n")
+
+    # --- le resume sur la PAGE du run --------------------------------
+    # Lisible sans deplier les logs. C'est ici que vit le tableau de bord.
     resume = os.environ.get("GITHUB_STEP_SUMMARY")
     if resume:
-        etat = "OK" if complet and not N429[0] else "a verifier"
+        sante = "OK" if complet and not N429[0] else "a verifier"
+        fait, total = etat.get("faits", 0), len(kinds)
+        depuis = time.time() - etat.get("cycle_debut", debut)
+        moy = (etat["total_sec"] / etat["cycles_faits"]
+               if etat.get("cycles_faits") else None)
+        # estimation de la fin du cycle : le rythme observe sur CE cycle,
+        # extrapole aux produits qui restent. Pas de modele, juste une
+        # regle de trois sur ce qu'on vient de mesurer.
+        reste = None
+        if fait and not cycle_boucle:
+            reste = depuis / fait * (total - fait)
         with open(resume, "a") as fh:
             fh.write(
-                f"### Lot {no_lot}/{runs_par_cycle} — {etat}\n\n"
+                f"## Cycle {etat['cycle']} · lot {no_lot}/{runs_par_cycle}"
+                f" — {sante}\n\n"
+                f"`{barre(fait, total)}` **{fait}/{total}** produits "
+                f"({fait * 100 // max(total, 1)} %)\n\n"
                 f"| | |\n|---|---|\n"
-                f"| Produits de ce lot | {situe} |\n"
-                f"| Carnets lus | {AVANCEE['lues']}/{len(a_lire)} |\n"
+                f"| Ce lot | {situe} |\n"
+                f"| Carnets lus | {AVANCEE['lues']}/{len(a_lire)}"
+                f"{'' if complet else ' — INCOMPLET'} |\n"
                 f"| Releves de prix | {AVANCEE['tickers']} |\n"
                 f"| Refus du serveur | {N429[0]} |\n"
-                f"| Duree | {ecoule:.0f} s dont "
+                f"| Duree de ce run | {ecoule:.0f} s dont "
                 f"{CHRONO['attente']:.0f} s d'attente quota |\n"
-                f"| Curseur | apres le produit {nouveau} |\n\n")
+                f"| Cycle en cours depuis | {duree_texte(depuis)} |\n"
+                + (f"| Fin du cycle estimee dans | {duree_texte(reste)} |\n"
+                   if reste else "")
+                + (f"| Cycle precedent | {duree_texte(etat['dernier_cycle_sec'])} |\n"
+                   if etat.get("dernier_cycle_sec") else "")
+                + (f"| Moyenne sur {etat['cycles_faits']} cycle(s) | "
+                   f"{duree_texte(moy)} |\n" if moy else "")
+                + f"| Curseur | apres le produit {nouveau} |\n\n"
+                + (f"> Le cycle {etat['cycle'] - 1} vient de se refermer en "
+                   f"{duree_texte(duree_cycle)}.\n\n" if cycle_boucle else ""))
 
     # Le temoin : sa presence dit au workflow que ce run est alle au bout.
     # Sans lui, pas de relance — c'est ce qui empeche une boucle de
@@ -902,7 +1034,7 @@ def main():
     with open(TEMOIN, "w") as fh:
         fh.write(stamp() + "\n")
 
-def fermer_et_envoyer(ordres, agg, volp, pxh, instant, dernier_kind=None,
+def fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat=None,
                       final=False):
     """Les heures terminees partent dans l'historique ; l'heure en cours, le
     carnet et les prix vont sur la branche live."""
@@ -939,10 +1071,12 @@ def fermer_et_envoyer(ordres, agg, volp, pxh, instant, dernier_kind=None,
         "heure_prix.csv": en_csv(EN_PRIX, lignes_prix(pxh)),
         "prix.csv": en_csv(EN_INSTANT, lignes_instant(instant)),
     }
-    # Le curseur voyage avec le carnet, dans le MEME commit : impossible
+    # L'etat voyage avec le carnet, dans le MEME commit : impossible
     # d'enregistrer les donnees sans enregistrer ou on en est, ou l'inverse.
-    if dernier_kind is not None:
-        fichiers[CURSEUR] = f"{dernier_kind}\n"
+    if etat:
+        fichiers[ETAT] = json.dumps(etat, indent=1, sort_keys=True) + "\n"
+        if etat.get("dernier") is not None:
+            fichiers[CURSEUR] = f"{etat['dernier']}\n"
     ok = pousser_live(fichiers)
     if ok:
         print(f"  envoye : {len(instant)} prix a la minute, "
