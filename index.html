@@ -225,7 +225,10 @@ function duree(ms) {
 /* ---------- lecture ------------------------------------------------ */
 
 async function charge(url, relatif) {
-  const cb = "?t=" + Math.floor(Date.now() / 60000);   // contourne le cache
+  // raw.githubusercontent repond "cache-control: max-age=300" : sans jeton
+  // qui change, le navigateur ET le CDN servent une version vieille de cinq
+  // minutes. Le jeton descend donc a 5 s, la maille de notre rafraichissement.
+  const cb = "?t=" + Math.floor(Date.now() / 5000);
   for (const u of (relatif ? [relatif + cb, url + cb] : [url + cb])) {
     try {
       const r = await fetch(u, {cache: "no-store"});
@@ -266,6 +269,8 @@ let SELQ = new Set();         // les qualites cochees
 let TR_AUTO = true;           // le transport suit le marche tant qu'on n'y touche pas
 const KIND_TRANSPORT = 13;
 let AGE = "";                 // fraicheur du carnet
+let ETAT = null;              // etat.json : cycle, lot, curseur
+let PREMIER = true;           // les ecouteurs ne s'attachent qu'une fois
 const COUL = i => "var(--s" + ((i % 8) + 1) + ")";
 
 function moisRecents(n) {
@@ -285,6 +290,14 @@ async function demarrer() {
                             "data/horaire/" + m + ".csv"))
   ]);
 
+  // Un rafraichissement qui ne recoit RIEN (reseau coupe, GitHub qui
+  // tousse) ne doit pas effacer ce qui est deja a l'ecran : on garde
+  // l'ancien affichage et on retentera au prochain tour.
+  if (!tOrdres && !tHeure && !tHist.some(Boolean) && ORDRES.length) {
+    console.warn("rafraichissement sans reponse : on garde l'affichage");
+    return;
+  }
+
   ORDRES = csv(tOrdres).map(r => ({
     k: +r.kind, q: +r.quality, id: r.order_id, sid: r.seller_id,
     p: num(r.price), qt: num(r.qty), d: num(r.delta),
@@ -302,6 +315,7 @@ async function demarrer() {
     return;
   }
 
+  HORAIRE.clear();          // sinon chaque rafraichissement empile les heures
   for (const r of hist) {
     const cle = (+r.kind) + "|" + (+r.quality || 0);
     if (!HORAIRE.has(cle)) HORAIRE.set(cle, []);
@@ -323,12 +337,16 @@ async function demarrer() {
     ...[...HORAIRE.keys()].map(c => +c.split("|")[0])])]
     .sort((a, b) => nom(a).localeCompare(nom(b), "fr"));
   const sel = document.getElementById("res");
+  const regardee = sel.value;        // ce que l'utilisateur avait choisi
+  sel.innerHTML = "";                // sinon les options s'empilent
   for (const k of kinds) {
     const o = document.createElement("option");
     o.value = k; o.textContent = nom(k) + "  (" + k + ")";
     sel.appendChild(o);
   }
-  sel.value = kinds.includes(146) ? "146" : String(kinds[0]);
+  // on lui rend SA ressource ; le defaut ne sert qu'au premier affichage
+  sel.value = (regardee && kinds.includes(+regardee)) ? regardee
+            : (kinds.includes(146) ? "146" : String(kinds[0]));
 
   const maj = ORDRES.reduce((m, o) => o.passage > m ? o.passage : m, "");
   AGE = maj ? (d => d === "a l'instant" ? d : "il y a " + d)
@@ -342,13 +360,19 @@ async function demarrer() {
     kinds.length + " ressources · derniere ressource lue " + AGE +
     " · historique : " + heures.size + " heures de marche, du " +
     jour(bornes[0]) + " au " + jour(bornes[bornes.length - 1]);
-  document.getElementById("foot").textContent =
-    "Le carnet est reecrit toutes les 5 minutes. L'historique est fige heure par heure.";
+  document.getElementById("foot").textContent = ETAT
+    ? "Cycle " + ETAT.cycle + " · " + (ETAT.faits ?? "?") + "/" +
+      ((ETAT.kinds && ETAT.kinds.length) || 142) + " produits parcourus · " +
+      "page mise a jour a la fin de chaque run (~" + POLL / 1000 + " s de latence)"
+    : "Le carnet est reecrit a chaque fin de run. L'historique est fige heure par heure.";
 
-  ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod", "i_dsp"]
-    .forEach(id => document.getElementById(id)
-      .addEventListener("change", id === "res" ? changerRessource : dessine));
-  document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
+  if (PREMIER) {
+    PREMIER = false;
+    ["res", "jours", "i_frais", "i_tr", "i_tru", "i_qte", "i_prod", "i_dsp"]
+      .forEach(id => document.getElementById(id)
+        .addEventListener("change", id === "res" ? changerRessource : dessine));
+    document.getElementById("i_tr").addEventListener("input", () => TR_AUTO = false);
+  }
   changerRessource();
 }
 
@@ -1068,8 +1092,57 @@ function tableau(pts) {
       '<tr><td colspan="11" class="dim">Rien a afficher.</td></tr>');
 }
 
-demarrer();
-setInterval(() => location.reload(), 5 * 60 * 1000);   // le carnet bouge toutes les 5 min
+/* ---------- la veille ----------------------------------------------
+   Recharger le carnet "au cas ou" coute 210 Ko a chaque fois. On demande
+   donc d'abord etat.json — 200 octets — qui porte le numero du run. Tant
+   qu'il n'a pas bouge, il ne s'est RIEN passe et on ne telecharge rien.
+   Des qu'il change, c'est qu'un run vient de finir : on rafraichit.
+   La page ne se recharge jamais : la ressource regardee, les qualites
+   cochees et la position dans la page sont conservees.               */
+const POLL = 10000;           // on demande des nouvelles toutes les 10 s
+let VU = null;                // signature du dernier run vu
+let EN_COURS = false;         // un rafraichissement a la fois
+let DERNIER = Date.now();     // repli si etat.json n'existe pas encore
+
+async function veille(amorce) {
+  if (EN_COURS) return;
+  const t = await charge(LIVE + "etat.json");
+
+  if (!t) {
+    // etat.json absent : la version de collect.py qui l'ecrit n'est pas
+    // encore deployee. On retombe sur un rafraichissement au temps, une
+    // fois par minute — jamais un rechargement de page.
+    if (!amorce && Date.now() - DERNIER > 60000) {
+      DERNIER = Date.now();
+      EN_COURS = true;
+      try { await demarrer(); } finally { EN_COURS = false; }
+    }
+    return;
+  }
+
+  let e;
+  try { e = JSON.parse(t); } catch (err) { return; }
+  const sig = e.run_no + "|" + e.dernier + "|" + e.faits;
+  ETAT = e;
+
+  if (amorce) { VU = sig; return; }      // premier passage : on note, sans plus
+  if (sig === VU) return;                // rien de neuf depuis le dernier run
+
+  VU = sig;
+  DERNIER = Date.now();
+  EN_COURS = true;
+  try { await demarrer(); } finally { EN_COURS = false; }
+}
+
+(async () => {
+  await veille(true);          // connaitre l'etat avant le premier affichage
+  await demarrer();
+  setInterval(veille, POLL);
+  // revenir sur l'onglet doit donner du frais tout de suite, sans attendre
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) veille();
+  });
+})();
 </script>
 </body>
 </html>
