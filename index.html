@@ -193,6 +193,9 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
 .reglages label.case{gap:5px}
 .reglages input[type=checkbox]{accent-color:var(--s1);width:14px;height:14px}
 tr.somme td{border-top:1px solid var(--bord);font-weight:600}
+
+tr.groupe td{background:var(--surf2);border-top:1px solid var(--bord);
+  padding-top:11px;color:var(--ink2);text-align:left}
 </style>
 </head>
 <body>
@@ -253,6 +256,22 @@ tr.somme td{border-top:1px solid var(--bord);font-weight:600}
     <p class="aide">Le meme contenu que la carte, en chiffres exacts et triable —
       c'est la vue de reference quand la couleur ne suffit pas.</p>
     <div class="tbl"><table id="t_142"></table></div>
+  </div>
+
+  <div class="carte" id="carte_mag" style="margin-top:14px">
+    <h2>Les magasins : ce qui s'ecoule par jour</h2>
+    <p class="aide">Pour chaque batiment de vente, ce que chaque produit ecoule
+      <b>par jour et par magasin</b>, qualite par qualite. C'est la donnee qui
+      manque pour decider quoi mettre en rayon : le prix de detail est fixe par
+      le jeu, donc tout se joue sur le debit.</p>
+    <div class="reglages" id="reg_mag">
+      <label>Niveau du magasin <input id="m_niv" type="number" min="1" max="30" step="1" value="1"></label>
+      <label>Bonus vente %     <input id="m_bv"  type="number" min="0" max="99" step="1" value="0"></label>
+      <label>Frais admin %     <input id="m_ad"  type="number" min="0" max="99" step="1" value="10"></label>
+      <label>Acceleration      <input id="m_ac"  type="number" min="0.1" max="5" step="0.01" value="1"></label>
+    </div>
+    <div class="tbl" style="margin-top:10px"><table id="t_mag"></table></div>
+    <p class="aide" id="n_mag" style="margin-top:8px"></p>
   </div>
 
   <div class="carte" id="carte_bat" style="margin-top:14px">
@@ -837,6 +856,7 @@ function rendMarche(){
 
   dessineCarte(lignes);
   rendTable142(lignes);
+  rendMagasins();
   rendBatiments();
 }
 
@@ -1289,7 +1309,8 @@ function coutRevient(k){
 /* ------------------------------------- vente au detail, modele du jeu -----
    Port fidele des quatre fonctions du jeu. La qualite ne touche PAS le prix
    de detail : elle accelere la vente. C'est la ou beaucoup se trompent.  */
-function detailInfo(k, q){
+function detailInfo(k, q, opt){
+  const R = opt || P;
   if(!JEU || !JEU.detail_modele) return null;
   const m = JEU.detail_modele[String(k)]; if(!m) return null;
   const L = batVente(k); if(!L) return null;
@@ -1311,11 +1332,12 @@ function detailInfo(k, q){
   const bb = mm - (prixD - v) * (prixD - v) * ((salMag + mm) / ((v - mcpu) * (v - mcpu)));
   const CC = (100 * ((prixD - mcpu) * 3600) - salMag) / (bb + salMag);
   if(!isFinite(CC) || CC <= 0) return null;
-  const tts = CC / P.accel / P.niv * (1 - P.bv/100);
+  const tts = CC / R.accel / R.niv * (1 - R.bv/100);
   const uph = 360000 / tts;
   if(!isFinite(uph) || uph <= 0) return null;
-  const salH = JEU.const.AVERAGE_SALARY * b.sm * P.niv * (1 + P.ad/100);
-  return {prix: prixD, uph, net: prixD - salH / uph, bat: b, salH, sat};
+  const salH = JEU.const.AVERAGE_SALARY * b.sm * R.niv * (1 + R.ad/100);
+  return {prix: prixD, uph, jour: uph * 24, net: prixD - salH / uph,
+          bat: b, lettre: L, salH, sat};
 }
 
 /* ------------------------------------------------------------ nom cliquable */
@@ -1485,15 +1507,18 @@ function rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci){
   document.getElementById("t_detail").innerHTML =
     "<thead><tr><th>Vente au detail</th>"
     + qs.map(q => `<th>${q === 0 ? "Q0" : q+"★"}</th>`).join("") + "</tr></thead><tbody>"
+    + `<tr><td>Unites par jour</td>`
+    + qs.map(q => { const d2 = detailInfo(k, q);
+        return `<td>${d2 ? court(d2.jour) : "—"}</td>`; }).join("") + "</tr>"
     + `<tr><td>Unites par heure</td>`
     + qs.map(q => { const d2 = detailInfo(k, q);
         return `<td>${d2 ? fmt(d2.uph,1) : "—"}</td>`; }).join("") + "</tr>"
     + `<tr><td>Net par unite</td>`
     + qs.map(q => { const d2 = detailInfo(k, q);
         return `<td>${d2 ? prix(d2.net) : "—"}</td>`; }).join("") + "</tr>"
-    + `<tr class="somme"><td><b>Resultat par magasin</b></td>`
+    + `<tr class="somme"><td><b>Resultat par magasin et par jour</b></td>`
     + qs.map(q => { const d2 = detailInfo(k, q);
-        return `<td><b>${d2 ? court((d2.net-ci.total)*d2.uph) : "—"}</b></td>`; }).join("")
+        return `<td><b>${d2 ? court((d2.net-ci.total)*d2.jour) : "—"}</b></td>`; }).join("")
     + "</tr></tbody>";
   document.getElementById("n_detail").innerHTML =
     `Vendu en <b>${det.bat.fr}</b> de niveau ${P.niv}. Le prix de detail `
@@ -1560,6 +1585,69 @@ document.addEventListener("click", e => {
   }
 });
 
+
+/* ================================ les magasins, produit par produit =======
+   Ce que chaque batiment de vente ecoule par jour, produit par produit et
+   qualite par qualite. Le prix de detail ne bouge pas avec la qualite — ce
+   qui bouge, c'est le debit — donc c'est bien une table de QUANTITES.    */
+const CAT_BAT = {production:"Production", sales:"Vente au detail",
+                 research:"Recherche", seasonal:"Saisonnier",
+                 recreation:"Loisir", other:"Autre"};
+function reglagesMagasin(){
+  const n = (id, d) => { const e = document.getElementById(id);
+    const v = e ? parseFloat(e.value) : NaN; return isFinite(v) ? v : d; };
+  const c = document.getElementById("m_rob");
+  return {niv: Math.max(1, n("m_niv", 1)), bv: Math.max(0, n("m_bv", 0)),
+          ad: Math.max(0, n("m_ad", 10)), accel: Math.max(0.1, n("m_ac", 1)),
+          nb: 1, rob: c ? c.checked : false};
+}
+function rendMagasins(){
+  const t = document.getElementById("t_mag"); if(!t || !JEU) return;
+  const R = reglagesMagasin();
+  const QS = [0, 3, 6, 9, 12];
+  const par = new Map();
+  for(const k of Object.keys(JEU.detail_modele)){
+    const d = detailInfo(+k, 0, R); if(!d) continue;
+    const l = par.get(d.lettre) || {bat: d.bat, lignes: []};
+    l.lignes.push({k: +k, d, q: QS.map(q => detailInfo(+k, q, R))});
+    par.set(d.lettre, l);
+  }
+  if(!par.size){ t.innerHTML = '<tbody><tr><td class="dim">Donnees de detail indisponibles.</td></tr></tbody>';
+    return; }
+  const groupes = [...par.values()].sort((a,b) => a.bat.fr.localeCompare(b.bat.fr,"fr"));
+  let html = "<thead><tr><th>Produit</th><th>Prix de detail</th>"
+    + QS.map(q => `<th>${q === 0 ? "Q0" : q+"★"}</th>`).join("")
+    + "<th>Net / unite</th><th>Recette / jour</th></tr></thead><tbody>";
+  for(const g of groupes){
+    const tot = g.lignes.reduce((s,x) => s + x.d.jour * x.d.prix, 0);
+    html += `<tr class="groupe"><td colspan="${QS.length + 4}">`
+          + `<b>${g.bat.fr}</b> · niveau ${R.niv} · ${g.lignes.length} produit(s)`
+          + ` · salaires ${prix(JEU.const.AVERAGE_SALARY * g.bat.sm * R.niv * (1 + R.ad/100))} $/h`
+          + `</td></tr>`;
+    for(const x of g.lignes.sort((a,b) => b.d.jour*b.d.prix - a.d.jour*a.d.prix)){
+      html += `<tr><td>${lienRes(x.k)}</td><td>${prix(x.d.prix)} $</td>`
+        + x.q.map(q => `<td>${q ? court(q.jour) : "—"}</td>`).join("")
+        + `<td>${prix(x.d.net)} $</td><td>${court(x.d.jour * x.d.net)} $</td></tr>`;
+    }
+    html += `<tr class="somme"><td colspan="${QS.length + 3}">`
+          + `<b>Chiffre d'affaires si le magasin ne vendait que ce produit</b></td>`
+          + `<td><b>jusqu'a ${court(Math.max(...g.lignes.map(x => x.d.jour * x.d.net)))} $/j</b></td></tr>`;
+  }
+  t.innerHTML = html + "</tbody>";
+  document.getElementById("n_mag").innerHTML =
+    `Quantites <b>par jour et par magasin</b>, a niveau ${R.niv}. Un magasin `
+    + `ne vend qu'un produit a la fois : les lignes sont des alternatives, pas `
+    + `une addition. La <b>qualite ne change pas le prix</b> — 12★ se vend au `
+    + `meme tarif que Q0, simplement plus vite. Le net deduit deja les salaires `
+    + `du magasin et l'administration, pas le cout de fabrication.`;
+}
+document.addEventListener("input", e => {
+  if(e.target && e.target.closest && e.target.closest("#reg_mag")){
+    clearTimeout(window.__tMag);
+    window.__tMag = setTimeout(rendMagasins, 300);
+  }
+});
+
 /* ================================================== les batiments du jeu == */
 function rendBatiments(){
   const t = document.getElementById("t_bat"); if(!t || !JEU) return;
@@ -1570,8 +1658,7 @@ function rendBatiments(){
     .map(([lettre, b]) => ({lettre, b, prod: parLettre[lettre] || []}))
     .filter(x => x.prod.length || x.b.cat !== "other")
     .sort((a, b2) => (a.b.cat.localeCompare(b2.b.cat) || a.b.cu - b2.b.cu));
-  const CAT = {production:"Production", sales:"Vente au detail", research:"Recherche",
-               seasonal:"Saisonnier", recreation:"Loisir", other:"Autre"};
+  const CAT = CAT_BAT;
   t.innerHTML =
     "<thead><tr><th>Batiment</th><th>Categorie</th><th>Produit</th>"
     + "<th>Unites de constr.</th><th>Chantier</th><th>Robots max</th></tr></thead><tbody>"

@@ -554,7 +554,7 @@ def flt(x):
         return None
 
 
-EN_DETAIL = ["kind", "prix", "saturation"]
+EN_DETAIL = ["kind", "prix", "saturation", "restaurant"]
 
 def lire_detail():
     """Prix de detail et saturation. Un echec n'est pas grave : le tableau
@@ -569,11 +569,16 @@ def lire_detail():
     for e in d:
         if not isinstance(e, dict) or e.get("quality") is not None:
             continue
-        p = e.get("averagePrice")
-        if p is None or p <= 0:
+        p = e.get("averagePrice") or 0
+        hist = e.get("retailData") or []
+        # les ventes en restaurant : un volume par JOUR, pour tout le serveur
+        resto = 0
+        if hist and isinstance(hist[-1], dict):
+            resto = int(hist[-1].get("amountSoldRestaurant") or 0)
+        if p <= 0 and not resto:
             continue
         lignes.append([e.get("dbLetter"), round(float(p), 4),
-                       round(float(e.get("saturation") or 1), 6)])
+                       round(float(e.get("saturation") or 1), 6), resto])
     lignes.sort(key=lambda r: r[0])
     return lignes or None
 
