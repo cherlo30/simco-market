@@ -155,6 +155,30 @@ img.vig{width:20px;height:20px;object-fit:contain;vertical-align:-5px;
 img.vig-g{width:38px;height:38px;object-fit:contain;vertical-align:-9px;
           margin-right:10px}
 .nom-prod{display:inline-flex;align-items:center;gap:0}
+
+/* etapes de la carte economique ------------------------------------------*/
+h3.etape{font-size:13px;letter-spacing:.04em;text-transform:uppercase;
+  color:var(--ink2);margin:22px 0 6px;padding-top:14px;
+  border-top:1px solid var(--grille)}
+h3.etape:first-of-type{margin-top:4px;padding-top:0;border-top:0}
+.perso-barre{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin-top:8px;font-size:12px}
+button.mini{font:inherit;font-size:12px;padding:3px 9px;border-radius:6px;
+  border:1px solid var(--bord);background:var(--surf2);color:var(--ink2);
+  cursor:pointer}
+button.mini:hover{border-color:var(--s1);color:var(--s1)}
+input.px{font:inherit;font-size:12.5px;width:88px;text-align:right;padding:2px 5px;
+  border:1px solid transparent;border-radius:5px;background:transparent;
+  color:var(--ink);-moz-appearance:textfield}
+input.px:hover{border-color:var(--grille)}
+input.px:focus{outline:none;border-color:var(--s1);background:var(--surf)}
+input.px.perso{border-color:var(--s2);background:color-mix(in oklab,var(--s2) 8%,transparent);
+  font-weight:600}
+input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
+  -webkit-appearance:none;margin:0}
+/* carte du marche : zoom et deplacement -----------------------------------*/
+.zoomable svg{cursor:grab;touch-action:none}
+.zoomable svg.attrape{cursor:grabbing}
 </style>
 </head>
 <body>
@@ -205,8 +229,9 @@ img.vig-g{width:38px;height:38px;object-fit:contain;vertical-align:-9px;
       valeur echangee sur la periode, sa <b>couleur</b> la variation de prix.
       C'est la reponse a « ou est l'argent, et dans quel sens ca va ».</p>
     <div class="legende" id="l_carte"></div>
-    <figure><div id="c_carte"></div>
-      <figcaption>Cliquer une ressource ouvre son analyse.</figcaption></figure>
+    <figure><div id="c_carte" class="zoomable"></div>
+      <figcaption>Molette pour zoomer, glisser pour se deplacer, double-clic
+        pour tout revoir. Cliquer une ressource ouvre son analyse.</figcaption></figure>
   </div>
 
   <div class="carte">
@@ -214,6 +239,15 @@ img.vig-g{width:38px;height:38px;object-fit:contain;vertical-align:-9px;
     <p class="aide">Le meme contenu que la carte, en chiffres exacts et triable —
       c'est la vue de reference quand la couleur ne suffit pas.</p>
     <div class="tbl"><table id="t_142"></table></div>
+  </div>
+
+  <div class="carte" id="carte_bat" style="margin-top:14px">
+    <h2>Les batiments</h2>
+    <p class="aide">Ce que chaque batiment sait produire, ce que coute un niveau
+      de plus, et combien de robots il accepte. Les vignettes sont cliquables :
+      elles ouvrent l'analyse de la ressource.</p>
+    <div class="tbl"><table id="t_bat"></table></div>
+    <p class="aide" id="n_bat" style="margin-top:8px"></p>
   </div>
 </section>
 
@@ -225,11 +259,13 @@ img.vig-g{width:38px;height:38px;object-fit:contain;vertical-align:-9px;
   <div class="carte" style="margin-bottom:14px">
     <h2>Prix, volume et profil</h2>
     <p class="aide">Le <b>meilleur prix du marche</b> heure par heure, avec sa
-      plage haut/bas en fond. La seconde courbe est le <b>prix moyen des
-      transactions</b> : la ou le marche a reellement traite, ce qui n'est
-      presque jamais le meilleur prix affiche. Dessous le volume par heure ;
-      a droite le meme volume redistribue <b>par prix</b> — les paliers longs
-      sont les prix que le marche absorbe.</p>
+      plage haut/bas en fond. La seconde courbe est le <b>prix reellement
+      traite</b>, lisse par une <b>mediane glissante</b> dont la fenetre suit la
+      periode affichee : une heure a deux transactions ne fait plus sauter la
+      courbe, et une vente aberrante ne la deplace pas. Les points pales sont
+      les valeurs brutes. Dessous le volume par heure ; a droite le meme volume
+      redistribue <b>par prix</b> — les paliers longs sont les prix que le
+      marche absorbe.</p>
     <div class="legende" id="l_bougies"></div>
     <figure><div id="c_bougies"></div>
       <figcaption id="f_bougies"></figcaption></figure>
@@ -250,38 +286,41 @@ img.vig-g{width:38px;height:38px;object-fit:contain;vertical-align:-9px;
     </div>
   </div>
 
-  <div class="grille" style="grid-template-columns:repeat(auto-fit,minmax(390px,1fr));margin-bottom:14px">
-    <div class="carte">
-      <h2>Bourse ou contrat ?</h2>
-      <p class="aide">Au prix actuel, ce qui te reste vraiment en poche. La
-        bourse prend <b><span id="tx_frais">4</span> % de frais</b> et le transport plein ; le contrat ne
-        prend <b>aucun frais</b> et <b>la moitie du transport</b>.</p>
-      <div class="tbl"><table id="t_canal"></table></div>
-      <p class="note" id="n_canal"></p>
+  <div class="carte" id="carte_eco" style="margin-bottom:14px">
+    <h2>Produire, vendre, transformer</h2>
+    <p class="aide">Toute l'economie du produit, dans l'ordre ou la question se
+      pose. <b>Chaque prix est modifiable</b> : clique dans une case pour mettre
+      ton propre prix d'achat ou de vente, tout se recalcule. Un prix modifie
+      est encadre ; le bouton remet le marche.</p>
+    <div class="perso-barre">
+      <span id="n_perso" class="dim"></span>
+      <button id="b_perso" class="mini" type="button">Revenir aux prix du marche</button>
     </div>
-    <div class="carte">
-      <h2>Ou se fait le volume, par qualite</h2>
-      <p class="aide">Les trois quarts du marche s'echangent hors qualite 0.
-        Cette vue dit sur quelle qualite se placer, et a quel prix.</p>
-      <figure><div id="c_qualites"></div>
-        <figcaption id="f_qualites"></figcaption></figure>
-    </div>
-  </div>
 
-  <div class="carte" id="carte_marge" style="margin-bottom:14px" hidden>
-    <h2>Fabrication : cout, cadence et marge</h2>
-    <p class="aide" id="a_marge"></p>
-    <div class="tuiles" id="t_prod" style="margin:10px 0 12px"></div>
+    <div class="tuiles" id="t_eco" style="margin:12px 0 4px"></div>
+
+    <h3 class="etape">1 · Produire</h3>
+    <p class="aide" id="a_prod"></p>
     <div class="tbl"><table id="t_marge"></table></div>
-    <p class="aide" id="n_marge" style="margin-top:10px"></p>
+    <p class="aide" id="n_marge" style="margin-top:8px"></p>
+
+    <h3 class="etape">2 · Vendre</h3>
+    <p class="aide" id="a_vendre"></p>
+    <div class="tbl"><table id="t_canal"></table></div>
+    <p class="note" id="n_canal"></p>
+
+    <h3 class="etape">3 · Transformer</h3>
+    <p class="aide" id="a_aval"></p>
+    <div class="tbl"><table id="t_aval"></table></div>
   </div>
 
-  <div class="carte" id="carte_aval" style="margin-bottom:14px" hidden>
-    <h2>Ce que ce produit alimente</h2>
-    <p class="aide">Les recettes qui consomment ce produit. La marge affichee est
-      celle du produit fini si tous ses intrants sont achetes au prix du marche :
-      elle dit si le transformer vaut mieux que le revendre tel quel.</p>
-    <div class="tbl"><table id="t_aval"></table></div>
+  <div class="carte" style="margin-bottom:14px">
+    <h2>Ou se fait le volume, par qualite</h2>
+    <p class="aide">Toutes les qualites du produit, y compris celles qui n'ont
+      rien echange sur la periode : une qualite vide est une information, pas un
+      trou. Cliquer une barre n'affiche plus que cette qualite.</p>
+    <figure><div id="c_qualites"></div>
+      <figcaption id="f_qualites"></figcaption></figure>
   </div>
 
 </section>
@@ -336,6 +375,37 @@ function vign(k, taille){
 // transportation par unite : la table du jeu fait foi
 const transportDe = k => { const r = jr(k); return r ? r.t : null; };
 const fraisBourse = () => (JEU && JEU.const ? JEU.const.exchangeFee : 0.04);
+
+
+/* ============================================== prix choisis par l'utilisateur
+   Le marche donne un prix ; l'utilisateur peut en imposer un autre (son prix
+   d'achat reel, un prix vise). PERSO ne remplace jamais la donnee : il se
+   pose par-dessus, et tout le calcul passe par pxRef().                   */
+const PERSO = new Map();
+try{ const s = localStorage.getItem("simco_prix");
+     if(s) for(const [k,v] of Object.entries(JSON.parse(s))) PERSO.set(+k, v);
+}catch(e){}
+function sauvePerso(){
+  try{ localStorage.setItem("simco_prix",
+       JSON.stringify(Object.fromEntries(PERSO))); }catch(e){}
+}
+const pxMarche = k => INSTANT.get(k)?.p ?? null;
+const pxRef    = k => PERSO.has(k) ? PERSO.get(k) : pxMarche(k);
+const estPerso = k => PERSO.has(k);
+function poserPrix(k, v){
+  if(v == null || !isFinite(v) || v <= 0) PERSO.delete(k); else PERSO.set(k, v);
+  sauvePerso();
+}
+// champ de saisie d'un prix, utilisable dans n'importe quelle cellule
+function champPrix(k){
+  const v = pxRef(k), m = pxMarche(k);
+  return `<input class="px${estPerso(k)?" perso":""}" type="number" step="0.0001"`
+       + ` min="0" data-k="${k}" value="${v == null ? "" : v}"`
+       + ` placeholder="${m == null ? "?" : m}"`
+       + ` title="${estPerso(k) ? "prix impose — vide la case pour revenir au marche ("
+                                 + (m == null ? "inconnu" : m + " $") + ")"
+                                : "prix du marche — tape ta propre valeur"}">`;
+}
 
 async function charge(url){
   const immuable = /\/[0-9a-f]{40}\//.test(url);
@@ -588,37 +658,102 @@ function dessineCarte(lignes){
   const box = document.getElementById("c_carte");
   const items = lignes.filter(r => r.val > 0).map(r => ({v:r.val, r}));
   if(!items.length){ box.innerHTML = '<div class="vide">Pas encore de volume sur cette periode.</div>'; return; }
-  const W = 1100, H = 420;
+  const W = 1100, H = 460;
   const s = svg(W, H); s.setAttribute("aria-label","Carte du marche par valeur echangee");
+  const monde = el(s,"g",{});          // tout le dessin vit dans ce calque
   const cases = squarifie(items, 0, 0, W, H);
   for(const c of cases){
-    const g = el(s,"g",{});
-    // 2 px de surface entre les pavés : un ecart, jamais un contour
+    const g = el(monde,"g",{});
+    // 2 px de surface entre les paves : un ecart, jamais un contour
     el(g,"rect",{x:c.x+1, y:c.y+1, width:Math.max(0,c.w-2), height:Math.max(0,c.h-2),
                  rx:3, fill:couleurVar(c.r.varp), stroke:"var(--bord)","stroke-width":1});
-    // Une etiquette ne s'ecrit que si elle tient AVEC sa marge : un mot
-    // rogne par son propre pave est pire que pas de mot du tout — la valeur
-    // reste lisible au survol et dans le tableau.
-    const dispo = c.w - 16;
-    if(dispo > 54 && c.h > 28){
-      // 11,5 px en gras coutent ~6,9 px par caractere : sous-estimer,
-      // c'est laisser un mot deborder sur le pave voisin.
+    // L'image d'abord : elle est le repere le plus rapide. Elle ne s'affiche
+    // que si le pave peut la porter sans manger le texte.
+    const u = typeof imgRes === "function" ? imgRes(c.r.k) : null;
+    const place = Math.min(c.w, c.h);
+    let tx = c.x + 8, perdu = 0;
+    if(u && place >= 26){
+      // Sur un grand pave l'image va a DROITE : le nom garde toute sa largeur.
+      // Sur un petit, elle va a gauche et remplace le nom, qui ne tiendrait
+      // pas de toute facon — une image reconnue vaut mieux qu'un mot coupe.
+      const grand = c.w >= 100 && c.h >= 40;
+      const t = grand ? 24 : Math.min(22, Math.max(14, place * .34));
+      if(grand){
+        el(g,"image",{href:u, x:c.x+c.w-t-7, y:c.y+6, width:t, height:t,
+                      preserveAspectRatio:"xMidYMid meet"});
+        perdu = t + 5;
+      }else{
+        el(g,"image",{href:u, x:c.x+6, y:c.y+6, width:t, height:t,
+                      preserveAspectRatio:"xMidYMid meet"});
+        tx = c.x + 6 + t + 5;
+      }
+    }
+    // Une etiquette ne s'ecrit que si elle tient AVEC sa marge : un mot rogne
+    // par son propre pave est pire que pas de mot du tout.
+    const dispo = c.x + c.w - 8 - tx - perdu;
+    if(dispo > 46 && c.h > 28){
       const n = nom(c.r.k), max = Math.floor(dispo / 6.9);
-      el(g,"text",{x:c.x+8, y:c.y+18, class:"g-nom"},
+      el(g,"text",{x:tx, y:c.y+18, class:"g-nom"},
          n.length > max ? n.slice(0, Math.max(2, max-1)) + "…" : n);
-      if(c.h > 44 && dispo > 54)
-        el(g,"text",{x:c.x+8, y:c.y+33, class:"g-tick"}, court(c.r.val)+" $");
+      if(c.h > 44)
+        el(g,"text",{x:tx, y:c.y+33, class:"g-tick"}, court(c.r.val)+" $");
     }
     g.style.cursor = "pointer";
-    g.addEventListener("mousemove", e => montreBulle(e,
+    g.addEventListener("mousemove", e => { if(!GLISSE) montreBulle(e,
       `<b>${nom(c.r.k)}</b><br>${court(c.r.val)} $ echanges<br>` +
       `${court(c.r.vol)} unites<br>prix ${prix(c.r.meilleur)} $ ` +
       `<span class="${(c.r.varp||0)>=0?"up":"down"}">` +
-      `${c.r.varp==null?"—":(c.r.varp>=0?"+":"")+fmt(c.r.varp,2)+" %"}</span>`));
+      `${c.r.varp==null?"—":(c.r.varp>=0?"+":"")+fmt(c.r.varp,2)+" %"}</span>`); });
     g.addEventListener("mouseleave", cacheBulle);
-    g.addEventListener("click", () => { cacheBulle(); ouvreProduit(c.r.k); });
+    g.addEventListener("click", () => { if(!BOUGE){ cacheBulle(); ouvreProduit(c.r.k); } });
   }
   box.innerHTML = ""; box.appendChild(s);
+
+  /* -------------------------------------------------- zoom et deplacement
+     Le zoom agit sur le viewBox, pas sur une transformation CSS : le trait
+     des bordures et la taille du texte restent ceux du dessin, donc une
+     zone agrandie reste nette et lisible au lieu d'etre une image etiree. */
+  let vb = {x:0, y:0, w:W, h:H};
+  const pose = () => s.setAttribute("viewBox", `${vb.x} ${vb.y} ${vb.w} ${vb.h}`);
+  const borne = () => {
+    vb.w = Math.min(W, Math.max(W/14, vb.w));
+    vb.h = vb.w * H / W;
+    vb.x = Math.min(W - vb.w, Math.max(0, vb.x));
+    vb.y = Math.min(H - vb.h, Math.max(0, vb.y));
+  };
+  // coordonnees du dessin sous le curseur
+  const sous = e => {
+    const r = s.getBoundingClientRect();
+    return {x: vb.x + (e.clientX - r.left) / r.width  * vb.w,
+            y: vb.y + (e.clientY - r.top ) / r.height * vb.h};
+  };
+  s.addEventListener("wheel", e => {
+    e.preventDefault();
+    const p = sous(e), f = e.deltaY > 0 ? 1.18 : 1/1.18, av = vb.w;
+    vb.w *= f; borne();
+    const k = vb.w / av;                       // le point sous le curseur ne bouge pas
+    vb.x = p.x - (p.x - vb.x) * k;
+    vb.y = p.y - (p.y - vb.y) * (vb.h / (av * H / W));
+    borne(); pose(); cacheBulle();
+  }, {passive:false});
+  let GLISSE = null, BOUGE = false;
+  s.addEventListener("pointerdown", e => {
+    GLISSE = {...sous(e)}; BOUGE = false;
+    s.classList.add("attrape"); s.setPointerCapture(e.pointerId);
+  });
+  s.addEventListener("pointermove", e => {
+    if(!GLISSE) return;
+    const p = sous(e), dx = GLISSE.x - p.x, dy = GLISSE.y - p.y;
+    if(Math.abs(dx) + Math.abs(dy) > vb.w/220) BOUGE = true;
+    vb.x += dx; vb.y += dy; borne(); pose();
+  });
+  const lache = e => { if(!GLISSE) return; GLISSE = null;
+    s.classList.remove("attrape");
+    setTimeout(()=>{ BOUGE = false; }, 0); };   // un vrai clic reste un clic
+  s.addEventListener("pointerup", lache);
+  s.addEventListener("pointercancel", lache);
+  s.addEventListener("dblclick", () => { vb = {x:0,y:0,w:W,h:H}; pose(); });
+
   document.getElementById("l_carte").innerHTML =
     `<span><i style="background:var(--baisse)"></i>baisse</span>` +
     `<span><i style="background:var(--neutre);border:1px solid var(--bord)"></i>stable</span>` +
@@ -648,13 +783,14 @@ function rendMarche(){
 
   dessineCarte(lignes);
   rendTable142(lignes);
+  rendBatiments();
 }
 
 let TRI = {col:"val", sens:-1};
 function rendTable142(lignes){
   const cols = [
     ["nom","Ressource",r=>nom(r.k),
-     r=>`<span class="nom-prod">${vign(r.k)}${nom(r.k)}</span>`],
+     r=>lienRes(r.k)],
     ["prix","Prix",r=>r.meilleur,r=>prix(r.meilleur)+" $"],
     ["varp","Variation",r=>r.varp??-1e9,r=> r.varp==null?'<span class="dim">—</span>'
        :`<span class="${r.varp>=0?"up":"down"}">${r.varp>=0?"+":""}${fmt(r.varp,2)} %</span>`],
@@ -737,6 +873,28 @@ function bougies(k, d0){
    haut/bas, et une seconde ligne pour le prix moyen REELLEMENT traite —
    celui-la n'est presque jamais le meilleur prix affiche, et c'est
    precisement l'ecart qui interesse un vendeur. */
+/* ------------------------------------------------------- lissage du prix
+   La fenetre suit la periode : quelques heures affichees -> fenetre courte
+   (on veut voir le detail) ; des semaines -> fenetre large (on veut la
+   tendance). Toujours impaire, pour que la fenetre soit centree sur son
+   point.                                                                 */
+function fenetreLissage(n){
+  const f = Math.round(n / 14) * 2 + 1;
+  return Math.max(3, Math.min(25, f));
+}
+function medianeGlissante(v, fen){
+  const d = (fen - 1) / 2;
+  return v.map((_, i) => {
+    const ech = [];
+    for(let j = Math.max(0, i-d); j <= Math.min(v.length-1, i+d); j++)
+      if(v[j] != null) ech.push(v[j]);
+    if(!ech.length) return null;
+    ech.sort((a,b) => a-b);
+    const m = ech.length >> 1;
+    return ech.length % 2 ? ech[m] : (ech[m-1] + ech[m]) / 2;
+  });
+}
+
 function dessineBougies(k){
   const box = document.getElementById("c_bougies");
   const d0 = depuisMs();
@@ -793,13 +951,26 @@ function dessineBougies(k){
   let l=""; px.forEach((r,i)=>{ l += (i?" L ":"M ")+X(i)+" "+Y(r.c); });
   el(s,"path",{d:l, fill:"none", stroke:"var(--s1)", "stroke-width":2,
                "stroke-linejoin":"round","stroke-linecap":"round"});
-  // --- le prix reellement traite ---
+  // --- le prix reellement traite, lisse ---
+  // Une moyenne heure par heure saute : une heure a deux transactions pese
+  // autant qu'une heure a mille, et un seul achat aberrant deplace le point.
+  // On prend donc la MEDIANE glissante des prix traites, sur une fenetre qui
+  // suit la periode affichee : la mediane ignore l'aberration au lieu de la
+  // moyenner, et la fenetre garde la meme allure de courbe qu'on regarde six
+  // heures ou six semaines.
+  const FEN = fenetreLissage(px.length);
+  const brut = px.map(r => vwapH.get(r.h) ?? null);
+  const liss = medianeGlissante(brut, FEN);
   let v="", ouvert=false;
-  px.forEach((r,i)=>{ const p=vwapH.get(r.h);
+  liss.forEach((p,i)=>{
     if(p==null){ ouvert=false; return; }
     v += (ouvert?" L ":" M ")+X(i)+" "+Y(p); ouvert=true; });
-  if(v) el(s,"path",{d:v, fill:"none", stroke:"var(--s2)", "stroke-width":2,
+  if(v) el(s,"path",{d:v, fill:"none", stroke:"var(--s2)", "stroke-width":2.2,
                      "stroke-linejoin":"round","stroke-linecap":"round"});
+  // les points bruts restent visibles, discrets : la courbe lisse ne doit pas
+  // faire oublier ou le marche a reellement traite
+  brut.forEach((p,i)=>{ if(p==null) return;
+    el(s,"circle",{cx:X(i), cy:Y(p), r:1.5, fill:"var(--s2)", opacity:.35}); });
   // le dernier point porte son etiquette : un chiffre sur chaque point serait
   // du bruit, un seul a l'extremite se lit sans quitter la courbe
   const dern = px.at(-1);
@@ -874,7 +1045,7 @@ function dessineBougies(k){
     (SELQ.size===QUALITES.length ? "meilleur prix du marche" :
      (SELQ.size===1 ? "prix de la qualite "+[...SELQ][0] : "prix des qualites cochees"))+
     ` (plage haut/bas en fond)</span>`+
-    `<span><i style="background:var(--s2)"></i>prix moyen des transactions</span>`;
+    `<span><i style="background:var(--s2)"></i>prix traite, mediane glissante (${FEN} h)</span>`;
   const nRepli = px.filter(r=>r.replie).length;
   document.getElementById("f_bougies").textContent =
     `${px.length} heures · derniere ${px.at(-1).h.replace("T"," ")} h, encore en `+
@@ -967,222 +1138,315 @@ function dessineAbsorption(k){
     `Sur ${heures.size} heures observees. Le net deduit les frais et le transport.`;
 }
 
-/* ============================================== cout de fabrication =======
-   Tout vient de jeu.json, extrait du code du jeu :
-     de   : la recette, {id_ressource: quantite} par unite produite
-     pph  : producedPerHourRaw, la cadence a niveau 1 au salaire de reference
-     at   : la lettre du batiment qui fabrique
-   Le cout d'un intrant est son meilleur prix de marche a l'instant. Un
-   intrant dont le prix est inconnu est signale, pas devine : une marge
-   calculee sur un trou n'est pas une marge.                               */
+/* ================================ economie du produit : un seul bloc ======
+   Trois questions qui n'en font qu'une : combien ca me coute a produire,
+   combien j'en tire en le vendant, combien j'en tirerais en le transformant.
+   Elles partagent le meme prix de reference, donc elles vivent ensemble ;
+   les repeter separement, c'est inviter trois chiffres a diverger.
+
+   Tout passe par pxRef() : le prix du marche par defaut, celui que
+   l'utilisateur a impose sinon.                                          */
+const FRAIS_BOURSE_DEFAUT = 0.04;
+const fraisB = () => (typeof fraisBourse === "function" ? fraisBourse() : FRAIS_BOURSE_DEFAUT);
+const KIND_TRANSPORT = 13;
 
 // production horaire reelle : pph x niveau x (1 + bonus%) x (salaire/mid)^sm
 function prodHoraire(k, niveau, bonusPct){
   const r = jr(k); if(!r) return null;
   const b = jbat(r.at), C = JEU.const;
-  const sm = b ? b.sm : 1;
-  const ratio = Math.pow(C.AVERAGE_SALARY / C.SALARY_MID[String(JEU.meta.realm)], sm);
+  const ratio = Math.pow(C.AVERAGE_SALARY / C.SALARY_MID[String(JEU.meta.realm)],
+                         b ? b.sm : 1);
   return r.pph * (niveau || 1) * (1 + (bonusPct || 0) / 100) * ratio;
 }
-// cout des intrants d'une unite, au prix du marche
+// cout des intrants d'une unite, aux prix de reference
 function coutIntrants(k){
   const r = jr(k); if(!r) return null;
   let total = 0; const lignes = []; let trou = false;
   for(const [ing, qte] of Object.entries(r.de)){
-    const u = INSTANT.get(+ing)?.p ?? null;
+    const u = pxRef(+ing);
     if(u == null) trou = true;
     total += (u || 0) * qte;
     lignes.push({kind:+ing, qte, u, t:(u||0)*qte});
   }
   return {total, lignes, trou};
 }
-function rendMarge(k){
-  const carte = document.getElementById("carte_marge");
+// nom cliquable avec sa vignette : partout le meme, partout un lien
+function lienRes(k){
+  return `<a class="nom-prod" href="#" onclick="ouvreProduit(${k});return false"`
+       + ` title="ouvrir l'analyse de ${nom(k)}">${vign(k)}${nom(k)}</a>`;
+}
+// quel batiment vend cette ressource au detail
+function batVente(k){
+  if(!JEU || !JEU.ventes) return null;
+  for(const [L, liste] of Object.entries(JEU.ventes))
+    if(liste.includes(+k)) return L;
+  return null;
+}
+function robotsMax(b){
+  const C = JEU.const;
+  const n = b.sm * (C.AVERAGE_SALARY * 24 * 7 * 5 * 0.03) / C.ROBOT_COST;
+  return Math.max(1, Math.ceil(n + (n - 4.5) * 1.2));
+}
+
+/* ------------------------------------------------------- les quatre chiffres
+   Ils sont en haut, une fois. Les tableaux dessous les expliquent, ils ne
+   les repetent pas.                                                      */
+function rendEco(k){
   const r = jr(k);
-  if(!r){ carte.hidden = true; return; }
-  carte.hidden = false;
+  const ci = r ? coutIntrants(k) : null;
+  const bat = r ? jbat(r.at) : null;
+  const p = pxRef(k);
+  const tr = r ? r.t : null;
+  const pT = pxRef(KIND_TRANSPORT);
+  const coutT = (pT ?? 0) * (tr ?? 0);
+  const bourse  = p == null ? null : p * (1 - fraisB()) - coutT;
+  const contrat = p == null ? null : p - coutT / 2;
+  const net = Math.max(bourse ?? -Infinity, contrat ?? -Infinity);
+  const marge = (p != null && ci) ? net - ci.total : null;
+  const cad = r ? prodHoraire(k, 1, 0) : null;
 
-  const ci = coutIntrants(k);
-  const bat = jbat(r.at);
-  const vente = INSTANT.get(k)?.p ?? null;
-  const fr = 1 - (+document.getElementById("i_frais").value || 0) / 100;
-  const net = vente != null ? vente * fr : null;
-  const marge = net != null ? net - ci.total : null;
-  const cad = prodHoraire(k, 1, 0);
-  const brut = marge != null && cad != null ? marge * cad : null;
+  document.getElementById("n_perso").textContent = PERSO.size
+    ? `${PERSO.size} prix impose${PERSO.size>1?"s":""} — les calculs les utilisent.`
+    : "Tous les calculs partent des prix du marche.";
+  document.getElementById("b_perso").hidden = !PERSO.size;
 
-  const nbRobots = bat ? (() => {
-    const C = JEU.const;
-    const n = bat.sm * (C.AVERAGE_SALARY * 24 * 7 * 5 * 0.03) / C.ROBOT_COST;
-    return Math.max(1, Math.ceil(n + (n - 4.5) * 1.2));
-  })() : null;
-
-  document.getElementById("a_marge").innerHTML = Object.keys(r.de).length
-    ? `Fabrique en <b>${bat ? bat.fr : "?"}</b>. Cout des intrants au meilleur `
-      + `prix du marche, contre le prix de vente net de frais.`
-      + (ci.trou ? ` <b class="down">Un intrant au moins n'a pas de prix connu :`
-                 + ` le cout ci-dessous est un plancher.</b>` : "")
-    : `<b>${nom(k)}</b> n'a pas de recette : c'est une ressource de base, `
-      + `extraite en <b>${bat ? bat.fr : "?"}</b>.`;
-
-  document.getElementById("t_prod").innerHTML =
-      tuile("Cout de revient", prix(ci.total) + " $", "intrants, par unite")
+  document.getElementById("t_eco").innerHTML =
+      tuile("Prix de reference", prix(p) + " $",
+            estPerso(k) ? "impose (marche " + prix(pxMarche(k)) + " $)" : "meilleur prix du marche")
+    + tuile("Cout de revient", ci ? prix(ci.total) + " $" : "—",
+            ci && Object.keys(r.de).length ? "intrants, par unite" : "ressource de base")
     + tuile("Marge unitaire", marge == null ? "—" : prix(marge) + " $",
-            "vente nette " + prix(net) + " $", (marge || 0) >= 0 ? "up" : "down")
-    + tuile("Cadence", cad == null ? "—" : fmt(cad, 1) + " u/h",
-            "batiment niveau 1, salaire moyen")
-    + tuile("Marge horaire", brut == null ? "—" : court(brut) + " $/h",
-            "par niveau de batiment", (brut || 0) >= 0 ? "up" : "down");
+            "meilleur canal, net de tout", (marge || 0) >= 0 ? "up" : "down")
+    + tuile("Marge horaire", (marge == null || cad == null) ? "—" : court(marge * cad) + " $/h",
+            "par niveau de batiment", (marge || 0) >= 0 ? "up" : "down");
 
-  document.getElementById("t_marge").innerHTML = Object.keys(r.de).length
+  rendProduire(k, r, ci, bat, cad);
+  rendVendre(k, r, p, tr, pT, bourse, contrat);
+  rendTransformer(k, r);
+}
+
+/* ------------------------------------------------------------ 1 · produire */
+function rendProduire(k, r, ci, bat, cad){
+  const a = document.getElementById("a_prod"), t = document.getElementById("t_marge");
+  if(!r){ a.textContent = "Ce produit n'est pas dans les donnees du jeu.";
+          t.innerHTML = ""; document.getElementById("n_marge").textContent = ""; return; }
+  const aRecette = Object.keys(r.de).length > 0;
+  a.innerHTML = aRecette
+    ? `Fabrique en <b>${bat ? bat.fr : "?"}</b>, <b>${fmt(cad,1)} u/h</b> a `
+      + `niveau 1 au salaire moyen. Chaque intrant est achete au prix indique.`
+      + (ci.trou ? ` <b class="down">Un intrant au moins n'a pas de prix connu :`
+                 + ` le cout est un plancher.</b>` : "")
+    : `<b>${nom(k)}</b> n'a pas de recette : ressource de base, extraite en `
+      + `<b>${bat ? bat.fr : "?"}</b> a <b>${fmt(cad,1)} u/h</b> par niveau.`;
+  t.innerHTML = aRecette
     ? "<thead><tr><th>Intrant</th><th>Quantite</th><th>Prix unitaire</th>"
       + "<th>Cout</th><th>Part</th></tr></thead><tbody>"
-      + ci.lignes.sort((a,b)=>b.t-a.t).map(x =>
-          `<tr><td><span class="nom-prod">${vign(x.kind)}${nom(x.kind)}</span></td>`
-          + `<td>${fmt(x.qte,x.qte<1?4:0)}</td>`
-          + `<td>${x.u == null ? '<span class="down">inconnu</span>' : prix(x.u)+" $"}</td>`
+      + ci.lignes.slice().sort((x,y)=>y.t-x.t).map(x =>
+          `<tr><td>${lienRes(x.kind)}</td>`
+          + `<td>${fmt(x.qte, x.qte < 1 ? 4 : 0)}</td>`
+          + `<td>${champPrix(x.kind)} $</td>`
           + `<td>${prix(x.t)} $</td>`
           + `<td>${ci.total ? fmt(x.t/ci.total*100,1)+" %" : "—"}</td></tr>`).join("")
       + `<tr><td colspan="3"><b>Cout par unite produite</b></td>`
-      + `<td><b>${prix(ci.total)} $</b></td><td></td></tr>`
-      + `<tr><td colspan="3">Vente nette de frais (${fmt((1-fr)*100,1)} %)</td>`
-      + `<td>${prix(net)} $</td><td></td></tr></tbody>`
+      + `<td><b>${prix(ci.total)} $</b></td><td></td></tr></tbody>`
     : "";
-
   document.getElementById("n_marge").innerHTML = bat
-    ? `<b>${bat.fr}</b> — construction ${bat.cu} unites de construction par `
-      + `niveau, ${duree(bat.dur*1000)} de chantier, coefficient de salaire `
-      + `${bat.sm}, jusqu'a <b>${nbRobots}</b> robot(s) par niveau. `
-      + `Niveaux disponibles : ${bat.paliers.join(", ") || "—"}.`
+    ? `<b>${bat.fr}</b> — ${bat.cu} unites de construction et `
+      + `${duree(bat.dur*1000)} par niveau, coefficient de salaire ${bat.sm}, `
+      + `jusqu'a <b>${robotsMax(bat)}</b> robot(s) par niveau. `
+      + `Niveaux : ${bat.paliers.join(", ") || "—"}.`
     : "";
 }
 
-/* ======================================= ce que ce produit alimente ======= */
-function rendAval(k){
-  const carte = document.getElementById("carte_aval"), r = jr(k);
-  if(!r || !r.util || !r.util.length){ carte.hidden = true; return; }
-  carte.hidden = false;
-  const p = INSTANT.get(k)?.p ?? null;
-  const fr = 1 - (+document.getElementById("i_frais").value || 0) / 100;
-  const l = r.util.map(a => {
-    const ra = jr(a), ci = coutIntrants(a);
-    const v = INSTANT.get(a)?.p ?? null;
-    const m = v != null && ci ? v * fr - ci.total : null;
-    const cad = prodHoraire(a, 1, 0);
-    return {a, qte: ra.de[String(k)], v, cout: ci ? ci.total : null, m,
-            h: m != null && cad != null ? m * cad : null, trou: ci && ci.trou};
-  }).sort((x, y) => (y.h ?? -1e18) - (x.h ?? -1e18));
-  document.getElementById("t_aval").innerHTML =
-    "<thead><tr><th>Produit</th><th>En consomme</th><th>Prix</th>"
-    + "<th>Cout intrants</th><th>Marge/u</th><th>Marge/h</th></tr></thead><tbody>"
-    + l.map(x => `<tr><td><span class="nom-prod">${vign(x.a)}`
-        + `<a href="#" onclick="ouvreProduit(${x.a});return false">${nom(x.a)}</a></span></td>`
+/* -------------------------------------------------------------- 2 · vendre */
+function rendVendre(k, r, p, tr, pT, bourse, contrat){
+  const a = document.getElementById("a_vendre"), t = document.getElementById("t_canal");
+  const tx = document.getElementById("tx_frais"); if(tx) tx.textContent = fmt(fraisB()*100,0);
+  const LV = batVente(k), bv = LV ? jbat(LV) : null;
+  a.innerHTML = `La <b>bourse</b> prend ${fmt(fraisB()*100,0)} % de frais et le `
+    + `transport plein ; le <b>contrat</b> ne prend aucun frais et la moitie du `
+    + `transport`
+    + (bv ? ` ; au <b>detail</b> il n'y a ni frais ni transport, mais il faut `
+          + `un ${bv.fr} et le debit y est plafonne.` : `.`);
+  if(p == null){ t.innerHTML = '<tbody><tr><td class="dim">Prix inconnu.</td></tr></tbody>';
+    document.getElementById("n_canal").textContent = ""; return; }
+  const coutT = (pT ?? 0) * (tr ?? 0);
+  const l = (n, a2, b2, c2, cls) =>
+    `<tr><td>${n}</td><td class="${cls||''}">${a2}</td>`
+    + `<td class="${cls||''}">${b2}</td><td class="${cls||''}">${c2}</td></tr>`;
+  const detail = bv ? prix(p) + " $" : "—";
+  t.innerHTML = "<thead><tr><th>Par unite</th><th>Bourse</th><th>Contrat</th>"
+    + "<th>Detail</th></tr></thead><tbody>"
+    + l("Prix de reference", prix(p)+" $", prix(p)+" $", detail)
+    + l("Frais de marche", "− "+prix(p*fraisB())+" $", "aucun", bv ? "aucun" : "—")
+    + l("Transport", tr === 0 ? "aucun" : "− "+prix(coutT)+" $",
+                     tr === 0 ? "aucun" : "− "+prix(coutT/2)+" $",
+                     bv ? "aucun" : "—")
+    + `<tr><td><b>Net en poche</b></td>`
+    + `<td><b>${prix(bourse)} $</b></td>`
+    + `<td><b class="${contrat>=bourse?"up":""}">${prix(contrat)} $</b></td>`
+    + `<td><b class="${bv?"up":""}">${detail}</b></td></tr>`
+    + l("Ecart avec la bourse", "—", "+"+prix(contrat-bourse)+" $",
+        bv ? "+"+prix(p-bourse)+" $" : "—", "up")
+    + "</tbody>";
+  document.getElementById("n_canal").innerHTML =
+    (tr === 0
+      ? `<b>${nom(k)}</b> ne coute aucun transport : le contrat n'y fait `
+        + `economiser que les ${fmt(fraisB()*100,0)} % de frais. `
+      : `Transport : <b>${tr}</b> unite(s) par unite vendue, au prix du `
+        + `Transport (${prix(pT)} $ l'unite). `)
+    + (bv
+        ? `Vendu au detail en <b>${bv.fr}</b>, environ <b>${fmt(r.vph,1)} u/h</b> `
+          + `de reference par magasin — le detail paie mieux a l'unite, mais il `
+          + `ne prend qu'un debit limite.`
+        : `Ce produit ne se vend pas au detail : il n'a de debouche qu'en `
+          + `bourse, en contrat, ou dans une recette.`);
+}
+
+/* --------------------------------------------------------- 3 · transformer */
+function rendTransformer(k, r){
+  const a = document.getElementById("a_aval"), t = document.getElementById("t_aval");
+  if(!r || !r.util || !r.util.length){
+    a.innerHTML = `Aucune recette ne consomme <b>${nom(k)}</b> : c'est un produit `
+      + `de bout de chaine, il ne se vend que tel quel.`;
+    t.innerHTML = ""; return; }
+  a.innerHTML = `Les recettes qui consomment ce produit, classees par marge `
+    + `horaire. La marge est celle du produit fini, tous intrants achetes aux `
+    + `prix de reference : elle repond a « je revends, ou je transforme ? ».`;
+  const l = r.util.map(x => {
+    const ra = jr(x), ci = coutIntrants(x);
+    const v = pxRef(x), bt = jbat(ra.at);
+    const trx = ra.t, pT = pxRef(KIND_TRANSPORT);
+    const net = v == null ? null : v * (1 - fraisB()) - (pT ?? 0) * (trx ?? 0);
+    const m = (net != null && ci) ? net - ci.total : null;
+    const cad = prodHoraire(x, 1, 0);
+    return {x, qte: ra.de[String(k)], v, cout: ci ? ci.total : null, m, bat: bt,
+            h: (m != null && cad != null) ? m * cad : null, trou: ci && ci.trou};
+  }).sort((u, w) => (w.h ?? -1e18) - (u.h ?? -1e18));
+  t.innerHTML =
+    "<thead><tr><th>Produit</th><th>Fabrique en</th><th>En consomme</th>"
+    + "<th>Prix</th><th>Cout intrants</th><th>Marge/u</th><th>Marge/h</th></tr></thead><tbody>"
+    + l.map(x => `<tr><td>${lienRes(x.x)}</td>`
+        + `<td>${x.bat ? x.bat.fr : "—"}</td>`
         + `<td>${fmt(x.qte, x.qte < 1 ? 4 : 0)}</td>`
         + `<td>${prix(x.v)} $</td>`
-        + `<td>${prix(x.cout)} $${x.trou ? ' <span class="down">*</span>' : ""}</td>`
+        + `<td>${prix(x.cout)} $${x.trou ? ' <span class="down" title="un intrant sans prix connu">*</span>' : ""}</td>`
         + `<td class="${(x.m||0)>=0?"up":"down"}">${prix(x.m)} $</td>`
         + `<td class="${(x.h||0)>=0?"up":"down"}">${x.h==null?"—":court(x.h)+" $/h"}</td></tr>`).join("")
     + "</tbody>";
 }
 
-/* ============================================= bourse contre contrat ======
-   Regles du jeu, verifiees a la source :
-     - vente en BOURSE  : 4 % de frais de marche, transport plein
-     - vente en CONTRAT : aucun frais, moitie du transport
-   Le code du jeu calcule le transport d'un contrat par
-   ceil(quantite x transportation / 2) — d'ou la division par deux ici.
-   Le transport se paie en unites de Transport (ressource 13), donc son
-   cout se lit au prix du marche de cette ressource, en direct.
-   L'electricite et l'eau ont transportation = 0 : elles ne coutent rien a
-   livrer, et le contrat n'y apporte que l'economie des 4 %.            */
-// Le taux vient de jeu.json (exchangeFee du realm 0 = 0.04). La FAQ publique
-// du jeu annonce encore 3 % : elle est perimee, le code du jeu dit 4 %.
-const FRAIS_BOURSE_DEFAUT = 0.04;
-const fraisB = () => (typeof fraisBourse === "function" ? fraisBourse() : FRAIS_BOURSE_DEFAUT);
-const KIND_TRANSPORT = 13;
-// La transportation des 151 ressources vient maintenant de jeu.json : plus
-// aucune valeur devinee, plus de champ a remplir a la main.
+/* ------------------------------------------------- saisie des prix imposes */
+document.addEventListener("input", e => {
+  const c = e.target;
+  if(!c.classList || !c.classList.contains("px")) return;
+  poserPrix(+c.dataset.k, c.value === "" ? null : parseFloat(c.value));
+  c.classList.toggle("perso", estPerso(+c.dataset.k));
+  clearTimeout(window.__tPerso);
+  window.__tPerso = setTimeout(() => { if(VUE === "produit") rendEco(KIND); }, 400);
+});
+document.addEventListener("click", e => {
+  if(e.target && e.target.id === "b_perso"){
+    PERSO.clear(); sauvePerso();
+    if(VUE === "produit") rendEco(KIND); else rendMarche();
+  }
+});
 
-function rendCanal(k){
-  const t = document.getElementById("t_canal");
-  const tx = document.getElementById("tx_frais");
-  if(tx) tx.textContent = fmt(fraisB()*100, 0);
-  const p = INSTANT.get(k)?.p ?? null;
-  const pT = INSTANT.get(KIND_TRANSPORT)?.p ?? null;
-  const tj = transportDe(k);
-  const connu = tj !== null && tj !== undefined;
-  const tr = connu ? tj : (+document.getElementById("i_tr").value || 0);
-  if(p == null){ t.innerHTML = '<tbody><tr><td class="dim">Prix inconnu.</td></tr></tbody>';
-    document.getElementById("n_canal").textContent=""; return; }
-
-  const coutT = (pT ?? 0) * tr;                 // cout de transport par unite
-  const bourse = p * (1 - fraisB()) - coutT;
-  const contrat = p - coutT / 2;
-  const ecart = contrat - bourse;
-  const l = (nom, a, b, cls) =>
-    `<tr><td>${nom}</td><td class="${cls||''}">${a}</td><td class="${cls||''}">${b}</td></tr>`;
-  t.innerHTML = "<thead><tr><th>Par unite</th><th>Bourse</th><th>Contrat</th></tr></thead><tbody>"
-    + l("Prix affiche", prix(p)+" $", prix(p)+" $")
-    + l("Frais de marche", "− "+prix(p*fraisB())+" $", "aucun")
-    + l("Transport", tr===0 ? "aucun" : "− "+prix(coutT)+" $",
-                     tr===0 ? "aucun" : "− "+prix(coutT/2)+" $")
-    + `<tr><td><b>Net en poche</b></td><td><b>${prix(bourse)} $</b></td>`
-    + `<td><b class="up">${prix(contrat)} $</b></td></tr>`
-    + l("Ecart", "", "+"+prix(ecart)+" $ ("+fmt(ecart/Math.max(bourse,1e-9)*100,1)+" %)", "up")
+/* ================================================== les batiments du jeu == */
+function rendBatiments(){
+  const t = document.getElementById("t_bat"); if(!t || !JEU) return;
+  const parLettre = {};
+  for(const [k, r] of Object.entries(JEU.res))
+    (parLettre[r.at] = parLettre[r.at] || []).push(+k);
+  const L = Object.entries(JEU.bat)
+    .map(([lettre, b]) => ({lettre, b, prod: parLettre[lettre] || []}))
+    .filter(x => x.prod.length || x.b.cat !== "other")
+    .sort((a, b2) => (a.b.cat.localeCompare(b2.b.cat) || a.b.cu - b2.b.cu));
+  const CAT = {production:"Production", sales:"Vente au detail", research:"Recherche",
+               seasonal:"Saisonnier", recreation:"Loisir", other:"Autre"};
+  t.innerHTML =
+    "<thead><tr><th>Batiment</th><th>Categorie</th><th>Produit</th>"
+    + "<th>Unites de constr.</th><th>Chantier</th><th>Robots max</th></tr></thead><tbody>"
+    + L.map(x => `<tr><td>${x.b.fr}</td><td>${CAT[x.b.cat] || x.b.cat}</td>`
+        + `<td>${x.prod.length
+              ? x.prod.map(k => `<a href="#" title="${nom(k)}" `
+                  + `onclick="ouvreProduit(${k});return false">${vign(k)}</a>`).join("")
+              : '<span class="dim">rien</span>'}</td>`
+        + `<td>${x.b.cu}</td><td>${duree(x.b.dur*1000)}</td>`
+        + `<td>${x.b.sm ? robotsMax(x.b) : "—"}</td></tr>`).join("")
     + "</tbody>";
-  document.getElementById("n_canal").innerHTML = tr===0
-    ? `<b>${nom(k)}</b> ne coute aucun transport. Le contrat ne fait donc `
-      + `economiser que les ${fmt(fraisB()*100,0)} % de frais.`
-    : (connu
-        ? `Transport : <b>${tr}</b> unite(s) par unite vendue, au prix du `
-          + `marche du Transport (${prix(pT)} $).`
-        : `<b>Valeur de transport inconnue pour ${nom(k)}</b> — j'utilise le `
-          + `champ « Transport » de la barre du haut (${tr}).`);
+  document.getElementById("n_bat").innerHTML =
+    `${L.length} batiments. Les unites de construction et la duree valent `
+    + `<b>par niveau</b>. Le nombre de robots depend du coefficient de salaire `
+    + `du batiment : plus il paie cher, plus il automatise.`;
 }
 
 /* ================================ ou se fait le volume, par qualite ====== */
 function dessineQualites(k){
-  const box=document.getElementById("c_qualites"), d0=depuisMs();
-  const par=new Map();
-  for(const [cle,lignes] of HOR){
-    const [kk,q]=cle.split("|").map(Number);
-    if(kk!==k) continue;
-    for(const r of lignes){ if(tsH(r.h)<d0) continue;
-      const a=par.get(q)||{q, vol:0, prix:null};
+  const box = document.getElementById("c_qualites"), d0 = depuisMs();
+  // On part de TOUTES les qualites connues du produit — celles qui ont
+  // echange, et celles qui sont seulement en vente. Une qualite a zero est
+  // une information ("personne n'achete la 7"), pas une ligne a cacher.
+  const par = new Map();
+  const vue = q => par.get(q) || (par.set(q, {q, vol:0, prix:null, offre:0, qte:0}),
+                                  par.get(q));
+  for(const q of QUALITES) vue(q);
+  for(const o of ORDRES){ if(o.k !== k) continue;
+    const a = vue(o.q); a.offre += 1; a.qte += o.qt;
+    if(a.prix == null || o.p < a.prix) a.prix = o.p; }
+  for(const [cle, lignes] of HOR){
+    const [kk, q] = cle.split("|").map(Number);
+    if(kk !== k) continue;
+    const a = vue(q);
+    for(const r of lignes){ if(tsH(r.h) < d0) continue;
       a.vol += r.vendu + r.disparu;
-      if(r.c!=null) a.prix = r.c;
-      par.set(q,a); }
+      if(r.c != null) a.px_tr = r.c; }
   }
-  const L=[...par.values()].filter(x=>x.vol>0).sort((a,b)=>a.q-b.q);
-  if(!L.length){ box.innerHTML='<div class="vide">Aucune vente observee.</div>';
-    document.getElementById("f_qualites").textContent=""; return; }
-  const W=560, H=Math.max(150, 34+L.length*26), M={g:44,d:96,h:24,b:8};
-  const s=svg(W,H); s.setAttribute("aria-label","Volume par qualite");
-  const x0=M.g, x1=W-M.d, vmax=Math.max(...L.map(x=>x.vol));
+  const L = [...par.values()].sort((a, b) => a.q - b.q);
+  if(!L.length){ box.innerHTML = '<div class="vide">Aucune qualite connue.</div>';
+    document.getElementById("f_qualites").textContent = ""; return; }
+  const W = 820, H = Math.max(150, 34 + L.length * 26), M = {g:70, d:186, h:24};
+  const s = svg(W, H); s.setAttribute("aria-label","Volume par qualite");
+  const x0 = M.g, x1 = W - M.d, vmax = Math.max(1, ...L.map(x => x.vol));
+  const tot = L.reduce((a, b) => a + b.vol, 0);
   el(s,"text",{x:x0, y:14, class:"g-titre"}, "Volume echange");
-  el(s,"text",{x:x1+8, y:14, class:"g-titre"}, "Prix");
-  L.forEach((x,i)=>{
-    const y=M.h+i*26, h=17, w=(x.vol/vmax)*(x1-x0);
+  el(s,"text",{x:x1+10, y:14, class:"g-titre"}, "Meilleur prix");
+  el(s,"text",{x:W-8, y:14, "text-anchor":"end", class:"g-titre"}, "En vente");
+  L.forEach((x, i) => {
+    const y = M.h + i*26, h = 17, w = (x.vol/vmax) * (x1-x0);
     el(s,"text",{x:x0-8, y:y+13, "text-anchor":"end", class:"g-tick"},
-       x.q===0?"qualite 0":x.q+"\u2605");
-    const r=el(s,"rect",{x:x0, y:y, width:Math.max(2,w), height:h, rx:4,
-      fill: SELQ.has(x.q)?"var(--s1)":"var(--grille)"});
-    el(s,"text",{x:x1+8, y:y+13, class:"g-tick"}, prix(x.prix));
-    r.style.cursor="pointer";
-    r.addEventListener("mousemove",e=>montreBulle(e,
-      `<b>${x.q===0?"qualite 0":"qualite "+x.q}</b><br>${ent(x.vol)} unites `+
-      `(${fmt(x.vol/L.reduce((s2,y2)=>s2+y2.vol,0)*100,1)} % du produit)<br>`+
-      `prix ${prix(x.prix)} $<br><span class="dim">cliquer pour n'afficher que celle-ci</span>`));
-    r.addEventListener("mouseleave",cacheBulle);
-    r.addEventListener("click",()=>{ cacheBulle(); SELQ=new Set([x.q]);
+       x.q === 0 ? "qualite 0" : x.q + "★");
+    // le rail de fond dit jusqu'ou va l'echelle : une barre nulle reste visible
+    el(s,"rect",{x:x0, y:y, width:x1-x0, height:h, rx:4, fill:"var(--grille)",
+                 opacity:.35});
+    el(s,"rect",{x:x0, y:y, width:Math.max(x.vol > 0 ? 2 : 0, w),
+      height:h, rx:4, fill:"var(--s1)",
+      opacity: SELQ.has(x.q) ? 1 : .38});
+    el(s,"text",{x:x1+10, y:y+13, class:"g-tick"}, prix(x.prix));
+    el(s,"text",{x:W-8, y:y+13, "text-anchor":"end", class:"g-tick"},
+       x.qte ? court(x.qte) : "—");
+    const zone = el(s,"rect",{x:x0, y:y, width:x1-x0, height:h, fill:"transparent"});
+    zone.style.cursor = "pointer";
+    zone.addEventListener("mousemove", e => montreBulle(e,
+      `<b>${x.q === 0 ? "qualite 0" : "qualite " + x.q}</b><br>`
+      + (x.vol > 0
+          ? `${ent(x.vol)} unites echangees (${fmt(x.vol/Math.max(tot,1)*100,1)} % du produit)<br>`
+          : `<span class="dim">rien d'echange sur la periode</span><br>`)
+      + `meilleur prix ${prix(x.prix)} $<br>`
+      + `${x.offre} offre(s), ${court(x.qte)} unites en vente<br>`
+      + `<span class="dim">cliquer pour n'afficher que celle-ci</span>`));
+    zone.addEventListener("mouseleave", cacheBulle);
+    zone.addEventListener("click", () => { cacheBulle(); SELQ = new Set([x.q]);
       majQualites(); rendProduit(); });
   });
-  box.innerHTML=""; box.appendChild(s);
-  const tot=L.reduce((a,b)=>a+b.vol,0), q0=L.find(x=>x.q===0)?.vol||0;
-  document.getElementById("f_qualites").textContent =
-    `${L.length} qualites actives · ${fmt((1-q0/tot)*100,0)} % du volume se fait `+
-    `hors qualite 0. Les barres pleines sont les qualites cochees ; cliquer en `+
-    `isole une.`;
+  box.innerHTML = ""; box.appendChild(s);
+  const q0 = L.find(x => x.q === 0)?.vol || 0;
+  const actives = L.filter(x => x.vol > 0).length;
+  document.getElementById("f_qualites").textContent = tot
+    ? `${L.length} qualites presentes sur le marche, ${actives} ont echange · `
+      + `${fmt((1-q0/tot)*100,0)} % du volume se fait hors qualite 0. Barre `
+      + `pleine = qualite cochee ; cliquer en isole une.`
+    : `${L.length} qualites en vente, aucune n'a echange sur la periode.`;
 }
 
 /* ======================================================= vue produit ====== */
@@ -1206,7 +1470,7 @@ async function rendProduit(){
     tuile("Volume echange", court(r.vol), court(r.val)+" $ de valeur") +
     tuile("Profondeur a -5 %", court(r.prof), r.offres+" offres, "+court(r.qte)+" u en vente");
   dessineBougies(k); dessineCarnet(k); dessineAbsorption(k);
-  rendMarge(k); rendAval(k); rendCanal(k); dessineQualites(k);
+  rendEco(k); dessineQualites(k);
 }
 
 /* ================================================== qualites et navigation */
