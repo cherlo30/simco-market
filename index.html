@@ -179,6 +179,20 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
 /* carte du marche : zoom et deplacement -----------------------------------*/
 .zoomable svg{cursor:grab;touch-action:none}
 .zoomable svg.attrape{cursor:grabbing}
+
+/* barre de reglages du calculateur ---------------------------------------*/
+.reglages{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;
+  margin-top:12px;padding:10px 12px;border:1px solid var(--grille);
+  border-radius:9px;background:var(--surf2);font-size:12px}
+.reglages label{display:inline-flex;align-items:center;gap:6px;
+  color:var(--ink2);white-space:nowrap}
+.reglages input[type=number]{font:inherit;font-size:12.5px;width:62px;
+  text-align:right;padding:3px 6px;border:1px solid var(--bord);
+  border-radius:6px;background:var(--surf);color:var(--ink)}
+.reglages input[type=number]:focus{outline:none;border-color:var(--s1)}
+.reglages label.case{gap:5px}
+.reglages input[type=checkbox]{accent-color:var(--s1);width:14px;height:14px}
+tr.somme td{border-top:1px solid var(--bord);font-weight:600}
 </style>
 </head>
 <body>
@@ -271,21 +285,6 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
       <figcaption id="f_bougies"></figcaption></figure>
   </div>
 
-  <div class="grille" style="grid-template-columns:repeat(auto-fit,minmax(390px,1fr));margin-bottom:14px">
-    <div class="carte">
-      <h2>Le carnet, maintenant</h2>
-      <p class="aide">Quantite cumulee disponible en partant du prix le plus bas.
-        La pente dit combien il faut payer pour acheter en volume.</p>
-      <figure><div id="c_carnet"></div><figcaption id="f_carnet"></figcaption></figure>
-    </div>
-    <div class="carte">
-      <h2>Ce que le marche absorbe par jour</h2>
-      <p class="aide">Si tu te places a ce prix, voila ce qui part par jour —
-        cumul de tout ce qui s'est vendu a ce prix ou plus cher.</p>
-      <figure><div id="c_absorb"></div><figcaption id="f_absorb"></figcaption></figure>
-    </div>
-  </div>
-
   <div class="carte" id="carte_eco" style="margin-bottom:14px">
     <h2>Produire, vendre, transformer</h2>
     <p class="aide">Toute l'economie du produit, dans l'ordre ou la question se
@@ -295,6 +294,18 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
     <div class="perso-barre">
       <span id="n_perso" class="dim"></span>
       <button id="b_perso" class="mini" type="button">Revenir aux prix du marche</button>
+    </div>
+
+    <div class="reglages" id="reglages">
+      <label>Batiments <input id="p_nb"    type="number" min="1"  step="1"    value="1"></label>
+      <label>Niveau    <input id="p_niv"   type="number" min="1"  max="30" step="1" value="1"></label>
+      <label class="case">Robots <input id="p_rob" type="checkbox"></label>
+      <label>Bonus production % <input id="p_bp" type="number" min="0" max="99" step="1" value="0"></label>
+      <label>Bonus vente %      <input id="p_bv" type="number" min="0" max="99" step="1" value="0"></label>
+      <label>Frais admin %      <input id="p_ad" type="number" min="0" max="99" step="1" value="10"></label>
+      <label>Rabais contrat %   <input id="p_rc" type="number" min="0" max="90" step="1" value="5"></label>
+      <label title="Multiplicateur d'acceleration de ton compte, lisible dans l'encyclopedie du jeu. 1 = aucun.">Acceleration <input id="p_ac" type="number" min="0.1" max="5" step="0.01" value="1"></label>
+      <span class="dim" id="n_reglages"></span>
     </div>
 
     <div class="tuiles" id="t_eco" style="margin:12px 0 4px"></div>
@@ -308,6 +319,9 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
     <p class="aide" id="a_vendre"></p>
     <div class="tbl"><table id="t_canal"></table></div>
     <p class="note" id="n_canal"></p>
+    <div class="tbl" id="w_detail" style="margin-top:10px" hidden>
+      <table id="t_detail"></table></div>
+    <p class="aide" id="n_detail" style="margin-top:8px"></p>
 
     <h3 class="etape">3 · Transformer</h3>
     <p class="aide" id="a_aval"></p>
@@ -321,6 +335,21 @@ input.px::-webkit-outer-spin-button,input.px::-webkit-inner-spin-button{
       trou. Cliquer une barre n'affiche plus que cette qualite.</p>
     <figure><div id="c_qualites"></div>
       <figcaption id="f_qualites"></figcaption></figure>
+  </div>
+
+  <div class="grille" style="grid-template-columns:repeat(auto-fit,minmax(390px,1fr));margin-bottom:14px">
+    <div class="carte">
+      <h2>Le carnet, maintenant</h2>
+      <p class="aide">Quantite cumulee disponible en partant du prix le plus bas.
+        La pente dit combien il faut payer pour acheter en volume.</p>
+      <figure><div id="c_carnet"></div><figcaption id="f_carnet"></figcaption></figure>
+    </div>
+    <div class="carte">
+      <h2>Ce que le marche absorbe par jour</h2>
+      <p class="aide">Si tu te places a ce prix, voila ce qui part par jour —
+        cumul de tout ce qui s'est vendu a ce prix ou plus cher.</p>
+      <figure><div id="c_absorb"></div><figcaption id="f_absorb"></figcaption></figure>
+    </div>
   </div>
 
 </section>
@@ -347,7 +376,7 @@ const L = f => DEPOT + (SHA || "refs/heads/live") + "/" + f;
    jeu.json contient tout ce que la bourse ne dit pas : recettes, cadence de
    production, batiments, transport, frais de marche. Extrait du bundle du
    jeu, il est charge une fois et sert ensuite a tous les calculs.       */
-let JEU = null;
+let JEU = null, DETAIL = null;
 async function chargeJeu(){
   if(JEU) return JEU;
   for(const u of ["jeu.json", HIST + "jeu.json"]){
@@ -355,6 +384,18 @@ async function chargeJeu(){
     if(t){ try{ JEU = JSON.parse(t); break; }catch(e){} }
   }
   return JEU;
+}
+/* prix de detail et saturation, rafraichis par le collecteur */
+async function chargeDetail(){
+  const t = await charge(L("detail.csv"));
+  if(!t) return null;
+  const d = {};
+  for(const r of csv(t)){
+    const p = num(r.prix), s = num(r.saturation);
+    if(r.kind && p != null) d[String(+r.kind)] = [p, s ?? 1];
+  }
+  if(Object.keys(d).length) DETAIL = d;
+  return DETAIL;
 }
 const jr   = k => JEU && JEU.res[k] ? JEU.res[k] : null;
 const jbat = L => JEU && JEU.bat[L] ? JEU.bat[L] : null;
@@ -389,7 +430,20 @@ function sauvePerso(){
   try{ localStorage.setItem("simco_prix",
        JSON.stringify(Object.fromEntries(PERSO))); }catch(e){}
 }
-const pxMarche = k => INSTANT.get(k)?.p ?? null;
+/* Le prix le plus frais n'est pas celui du ticker : c'est celui du carnet,
+   relu a chaque passage du collecteur. Le ticker, lui, ne publie qu'une
+   valeur par produit et peut avoir une heure de retard sur une qualite.
+   On lit donc le carnet d'abord, le ticker en secours.                   */
+function meilleurCarnet(k, qualites){
+  let m = null;
+  for(const o of ORDRES){
+    if(o.k !== k) continue;
+    if(qualites && !qualites.has(o.q)) continue;
+    if(m == null || o.p < m) m = o.p;
+  }
+  return m;
+}
+const pxMarche = k => meilleurCarnet(k) ?? INSTANT.get(k)?.p ?? null;
 const pxRef    = k => PERSO.has(k) ? PERSO.get(k) : pxMarche(k);
 const estPerso = k => PERSO.has(k);
 function poserPrix(k, v){
@@ -471,7 +525,7 @@ let KINDS = [];
 
 /* ============================================================ chargement == */
 async function chargerTout(){
-  chargeJeu();                       // en tache de fond, une seule fois
+  chargeJeu(); chargeDetail();       // en tache de fond
   const mois = moisRecents(2);
   const [tOrd, tIns, tHp, tHh, ...reste] = await Promise.all([
     charge(L("ordres.csv")), charge(L("prix.csv")),
@@ -608,7 +662,7 @@ function resumeProduit(k){
     }
   }
   const carnet = ORDRES.filter(o => o.k === k).sort((a,b) => a.p-b.p);
-  const meilleur = INSTANT.get(k)?.p ?? (carnet[0]?.p ?? px.at(-1)?.c ?? null);
+  const meilleur = pxMarche(k) ?? px.at(-1)?.c ?? null;
   const ref = px.length ? px[0].o : null;
   const varp = (ref && meilleur) ? (meilleur/ref - 1)*100 : null;
   const prof = carnet.length
@@ -864,7 +918,20 @@ function bougies(k, d0){
     if(tsH(r.h) < d0 || r.c == null) continue;
     par.set(r.h, {...r, replie:false});
   }
-  return [...par.values()].sort((a,b) => a.h < b.h ? -1 : 1);
+  const L = [...par.values()].sort((a,b) => a.h < b.h ? -1 : 1);
+  // L'heure en cours est encore en construction : son dernier releve peut
+  // dater de plusieurs minutes alors que le carnet, lui, vient d'etre relu.
+  // On recale donc le dernier point sur le carnet des qualites affichees,
+  // sinon la courbe et le chiffre en haut de page se contredisent.
+  const vif = meilleurCarnet(k, toutes ? null : SELQ);
+  if(L.length && vif != null){
+    const d = L.at(-1);
+    d.c = vif;
+    d.lo = Math.min(d.lo ?? vif, vif);
+    d.hi = Math.max(d.hi ?? vif, vif);
+    d.vif = true;
+  }
+  return L;
 }
 
 /* Le prix se lit en LIGNE, pas en bougies. Sur ce marche la plage d'une
@@ -1141,45 +1208,125 @@ function dessineAbsorption(k){
 /* ================================ economie du produit : un seul bloc ======
    Trois questions qui n'en font qu'une : combien ca me coute a produire,
    combien j'en tire en le vendant, combien j'en tirerais en le transformant.
-   Elles partagent le meme prix de reference, donc elles vivent ensemble ;
-   les repeter separement, c'est inviter trois chiffres a diverger.
+   Elles partagent le meme prix de reference et les memes reglages, donc elles
+   vivent ensemble ; les separer, c'est inviter trois chiffres a diverger.
 
-   Tout passe par pxRef() : le prix du marche par defaut, celui que
-   l'utilisateur a impose sinon.                                          */
+   Les formules ci-dessous sont celles du jeu, relevees dans son code, pas
+   des approximations :
+
+     production/h = niveau x pph x (SALAIRE_MOYEN/SALAIRE_MID)^coef_salaire
+                    x (mine ? 0.88 : 1) x (1 + modif%/100) / (1 - bonus%/100)
+     salaires/h   = SALAIRE_MOYEN x coef_salaire x niveau
+     admin/h      = salaires/h x frais_admin%
+     robots       = min(plancher(niveau/4), 12) ; installes : salaires x 0.97
+     construction = {beton 4, briques 55, planches 16, unites 1} x costUnits
+                    x niveau ; duree = niveau x buildDuration
+
+   Le salaire est donc bien proportionnel au niveau — un niveau de plus, c'est
+   autant d'ouvriers en plus — et l'administration se pose par-dessus. La
+   production monte au meme rythme, donc le cout salarial PAR UNITE ne bouge
+   pas avec le niveau : ce qui change, c'est le volume.                    */
 const FRAIS_BOURSE_DEFAUT = 0.04;
 const fraisB = () => (typeof fraisBourse === "function" ? fraisBourse() : FRAIS_BOURSE_DEFAUT);
 const KIND_TRANSPORT = 13;
 
-// production horaire reelle : pph x niveau x (1 + bonus%) x (salaire/mid)^sm
-function prodHoraire(k, niveau, bonusPct){
-  const r = jr(k); if(!r) return null;
-  const b = jbat(r.at), C = JEU.const;
-  const ratio = Math.pow(C.AVERAGE_SALARY / C.SALARY_MID[String(JEU.meta.realm)],
-                         b ? b.sm : 1);
-  return r.pph * (niveau || 1) * (1 + (bonusPct || 0) / 100) * ratio;
+const P = {nb:1, niv:1, rob:false, bp:0, bv:0, ad:10, rc:5, accel:1};
+function litReglages(){
+  const n = (id, d) => { const e = document.getElementById(id);
+    const v = e ? parseFloat(e.value) : NaN; return isFinite(v) ? v : d; };
+  P.nb  = Math.max(1, n("p_nb", 1));
+  P.niv = Math.max(1, n("p_niv", 1));
+  P.bp  = Math.min(99, Math.max(0, n("p_bp", 0)));
+  P.bv  = Math.min(99, Math.max(0, n("p_bv", 0)));
+  P.ad  = Math.max(0, n("p_ad", 10));
+  P.rc  = Math.min(90, Math.max(0, n("p_rc", 5)));
+  P.accel = Math.max(0.1, n("p_ac", 1));
+  const c = document.getElementById("p_rob"); P.rob = c ? c.checked : false;
 }
-// cout des intrants d'une unite, aux prix de reference
-function coutIntrants(k){
+const estMine = k => JEU && JEU.const.MINES.includes(+k);
+// le modificateur de vitesse en cours pour cette ressource, s'il y en a un
+const modifJeu = k => 0;
+
+/* production horaire d'UN batiment au niveau demande */
+function prodHoraire(k, niv, bonus){
+  const r = jr(k); if(!r || !JEU) return null;
+  const b = jbat(r.at), C = JEU.const;
+  const base = r.pph * Math.pow(C.AVERAGE_SALARY / C.SALARY_MID[String(JEU.meta.realm)],
+                                b ? b.sm : 1);
+  const ab = estMine(k) ? C.ABONDANCE_MINE : 1;
+  return (niv || 1) * base * ab * (1 + modifJeu(k)/100) / (1 - (bonus || 0)/100);
+}
+/* salaires et administration, par heure et par batiment */
+function salairesH(k, niv){
+  const r = jr(k); if(!r || !JEU) return 0;
+  const b = jbat(r.at); if(!b) return 0;
+  return JEU.const.AVERAGE_SALARY * b.sm * (niv || 1);
+}
+function robotsDispo(niv){
+  if(!JEU) return 0;
+  return Math.min(Math.floor((niv||1) / JEU.const.ROBOTS_PAR_NIVEAU), JEU.const.ROBOTS_MAX);
+}
+/* cout complet d'une unite : intrants + main-d'oeuvre + administration */
+function coutRevient(k){
   const r = jr(k); if(!r) return null;
-  let total = 0; const lignes = []; let trou = false;
+  let intrants = 0; const lignes = []; let trou = false;
   for(const [ing, qte] of Object.entries(r.de)){
     const u = pxRef(+ing);
     if(u == null) trou = true;
-    total += (u || 0) * qte;
+    intrants += (u || 0) * qte;
     lignes.push({kind:+ing, qte, u, t:(u||0)*qte});
   }
-  return {total, lignes, trou};
+  const prod = prodHoraire(k, P.niv, P.bp) || 0;
+  const rob  = P.rob && robotsDispo(P.niv) > 0;
+  const sal  = salairesH(k, P.niv) * (rob ? 1 - JEU.const.ROBOT_GAIN_SALAIRE : 1);
+  const adm  = sal * P.ad / 100;
+  const salU = prod > 0 ? sal / prod : null;
+  const admU = prod > 0 ? adm / prod : null;
+  return {intrants, lignes, trou, prod, sal, adm, salU, admU, rob,
+          total: intrants + (salU || 0) + (admU || 0)};
 }
-// nom cliquable avec sa vignette : partout le meme, partout un lien
+
+/* ------------------------------------- vente au detail, modele du jeu -----
+   Port fidele des quatre fonctions du jeu. La qualite ne touche PAS le prix
+   de detail : elle accelere la vente. C'est la ou beaucoup se trompent.  */
+function detailInfo(k, q){
+  if(!JEU || !JEU.detail_modele) return null;
+  const m = JEU.detail_modele[String(k)]; if(!m) return null;
+  const L = batVente(k); if(!L) return null;
+  const b = jbat(L); if(!b) return null;
+  const viv = (DETAIL && DETAIL[String(k)]) || JEU.detail_repli[String(k)];
+  if(!viv || !viv[0]) return null;
+  const prixD = viv[0], sat = viv[1];
+  const C = JEU.const;
+  const [blnp, mcpu, wag, musah] = m;
+  const salMag = wag == null ? 0 : wag;
+  const d = Math.min(Math.max(2 - sat, 0), 2);
+  const p = Math.max(.9, d/2 + .5);
+  const fq = (q || 0) / 12;
+  const mm = C.RETAIL_BASE * (blnp * musah + 1)
+           * (C.RETAIL_BUILDING_FACTOR[L] ?? 1)
+           * (d/2 * (1 + fq * C.RETAIL_MODELING_QUALITY_WEIGHT));
+  const h = musah * p;
+  const v = mcpu + (mm + salMag) / h;
+  const bb = mm - (prixD - v) * (prixD - v) * ((salMag + mm) / ((v - mcpu) * (v - mcpu)));
+  const CC = (100 * ((prixD - mcpu) * 3600) - salMag) / (bb + salMag);
+  if(!isFinite(CC) || CC <= 0) return null;
+  const tts = CC / P.accel / P.niv * (1 - P.bv/100);
+  const uph = 360000 / tts;
+  if(!isFinite(uph) || uph <= 0) return null;
+  const salH = JEU.const.AVERAGE_SALARY * b.sm * P.niv * (1 + P.ad/100);
+  return {prix: prixD, uph, net: prixD - salH / uph, bat: b, salH, sat};
+}
+
+/* ------------------------------------------------------------ nom cliquable */
 function lienRes(k){
   return `<a class="nom-prod" href="#" onclick="ouvreProduit(${k});return false"`
        + ` title="ouvrir l'analyse de ${nom(k)}">${vign(k)}${nom(k)}</a>`;
 }
-// quel batiment vend cette ressource au detail
 function batVente(k){
   if(!JEU || !JEU.ventes) return null;
   for(const [L, liste] of Object.entries(JEU.ventes))
-    if(liste.includes(+k)) return L;
+    if(L !== "r" && liste.includes(+k)) return L;
   return null;
 }
 function robotsMax(b){
@@ -1188,106 +1335,135 @@ function robotsMax(b){
   return Math.max(1, Math.ceil(n + (n - 4.5) * 1.2));
 }
 
-/* ------------------------------------------------------- les quatre chiffres
-   Ils sont en haut, une fois. Les tableaux dessous les expliquent, ils ne
-   les repetent pas.                                                      */
+/* ------------------------------------------------------- les quatre chiffres */
 function rendEco(k){
+  litReglages();
   const r = jr(k);
-  const ci = r ? coutIntrants(k) : null;
+  const ci = r ? coutRevient(k) : null;
   const bat = r ? jbat(r.at) : null;
-  const p = pxRef(k);
-  const tr = r ? r.t : null;
-  const pT = pxRef(KIND_TRANSPORT);
+  const p = pxRef(k), tr = r ? r.t : null, pT = pxRef(KIND_TRANSPORT);
   const coutT = (pT ?? 0) * (tr ?? 0);
   const bourse  = p == null ? null : p * (1 - fraisB()) - coutT;
-  const contrat = p == null ? null : p - coutT / 2;
-  const net = Math.max(bourse ?? -Infinity, contrat ?? -Infinity);
-  const marge = (p != null && ci) ? net - ci.total : null;
-  const cad = r ? prodHoraire(k, 1, 0) : null;
+  const contrat = p == null ? null : p * (1 - P.rc/100) - coutT / 2;
+  const det = r ? detailInfo(k, [...SELQ][0] ?? 0) : null;
+  const canaux = [bourse, contrat, det ? det.net : null].filter(x => x != null);
+  const net = canaux.length ? Math.max(...canaux) : null;
+  const marge = (net != null && ci) ? net - ci.total : null;
+  // le detail plafonne le debit : on ne peut pas ecouler plus que uph
+  const debit = ci ? ci.prod : null;
+  const totalH = (marge != null && debit != null) ? marge * debit * P.nb : null;
 
   document.getElementById("n_perso").textContent = PERSO.size
     ? `${PERSO.size} prix impose${PERSO.size>1?"s":""} — les calculs les utilisent.`
     : "Tous les calculs partent des prix du marche.";
   document.getElementById("b_perso").hidden = !PERSO.size;
+  document.getElementById("n_reglages").innerHTML = bat
+    ? `${robotsDispo(P.niv)} emplacement(s) de robot au niveau ${P.niv}`
+      + (P.rob && robotsDispo(P.niv) === 0
+          ? ` — <b class="down">aucun robot possible avant le niveau 4</b>` : "")
+    : "";
 
   document.getElementById("t_eco").innerHTML =
       tuile("Prix de reference", prix(p) + " $",
             estPerso(k) ? "impose (marche " + prix(pxMarche(k)) + " $)" : "meilleur prix du marche")
     + tuile("Cout de revient", ci ? prix(ci.total) + " $" : "—",
-            ci && Object.keys(r.de).length ? "intrants, par unite" : "ressource de base")
+            ci ? "intrants + salaires + admin" : "")
     + tuile("Marge unitaire", marge == null ? "—" : prix(marge) + " $",
             "meilleur canal, net de tout", (marge || 0) >= 0 ? "up" : "down")
-    + tuile("Marge horaire", (marge == null || cad == null) ? "—" : court(marge * cad) + " $/h",
-            "par niveau de batiment", (marge || 0) >= 0 ? "up" : "down");
+    + tuile("Resultat estime", totalH == null ? "—" : court(totalH) + " $/h",
+            ci ? `${P.nb} x niveau ${P.niv} · ${court((debit||0)*P.nb)} u/h`
+               : "", (totalH || 0) >= 0 ? "up" : "down");
 
-  rendProduire(k, r, ci, bat, cad);
-  rendVendre(k, r, p, tr, pT, bourse, contrat);
+  rendProduire(k, r, ci, bat);
+  rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci);
   rendTransformer(k, r);
 }
 
 /* ------------------------------------------------------------ 1 · produire */
-function rendProduire(k, r, ci, bat, cad){
+function rendProduire(k, r, ci, bat){
   const a = document.getElementById("a_prod"), t = document.getElementById("t_marge");
   if(!r){ a.textContent = "Ce produit n'est pas dans les donnees du jeu.";
           t.innerHTML = ""; document.getElementById("n_marge").textContent = ""; return; }
   const aRecette = Object.keys(r.de).length > 0;
-  a.innerHTML = aRecette
-    ? `Fabrique en <b>${bat ? bat.fr : "?"}</b>, <b>${fmt(cad,1)} u/h</b> a `
-      + `niveau 1 au salaire moyen. Chaque intrant est achete au prix indique.`
-      + (ci.trou ? ` <b class="down">Un intrant au moins n'a pas de prix connu :`
-                 + ` le cout est un plancher.</b>` : "")
-    : `<b>${nom(k)}</b> n'a pas de recette : ressource de base, extraite en `
-      + `<b>${bat ? bat.fr : "?"}</b> a <b>${fmt(cad,1)} u/h</b> par niveau.`;
-  t.innerHTML = aRecette
-    ? "<thead><tr><th>Intrant</th><th>Quantite</th><th>Prix unitaire</th>"
-      + "<th>Cout</th><th>Part</th></tr></thead><tbody>"
-      + ci.lignes.slice().sort((x,y)=>y.t-x.t).map(x =>
-          `<tr><td>${lienRes(x.kind)}</td>`
-          + `<td>${fmt(x.qte, x.qte < 1 ? 4 : 0)}</td>`
-          + `<td>${champPrix(x.kind)} $</td>`
-          + `<td>${prix(x.t)} $</td>`
-          + `<td>${ci.total ? fmt(x.t/ci.total*100,1)+" %" : "—"}</td></tr>`).join("")
-      + `<tr><td colspan="3"><b>Cout par unite produite</b></td>`
-      + `<td><b>${prix(ci.total)} $</b></td><td></td></tr></tbody>`
-    : "";
+  const sais = r.sp ? ` La saison fait varier la recolte de `
+    + `<b>${fmt(ci.prod*JEU.const.SAISON_MIN,1)}</b> a `
+    + `<b>${fmt(ci.prod*JEU.const.SAISON_MAX,1)} u/h</b>.` : "";
+  a.innerHTML = `Fabrique en <b>${bat ? bat.fr : "?"}</b>. `
+    + `<b>${P.nb}</b> batiment(s) de niveau <b>${P.niv}</b> produisent `
+    + `<b>${fmt(ci.prod * P.nb, 1)} u/h</b>`
+    + (estMine(k) ? ` (abondance des mines : 88 %)` : "")
+    + `.${sais}`
+    + (ci.trou ? ` <b class="down">Un intrant au moins n'a pas de prix connu :`
+               + ` le cout est un plancher.</b>` : "");
+  const li = ci.lignes.slice().sort((x,y)=>y.t-x.t).map(x =>
+      `<tr><td>${lienRes(x.kind)}</td>`
+      + `<td>${fmt(x.qte, x.qte < 1 ? 4 : 0)}</td>`
+      + `<td>${champPrix(x.kind)} $</td>`
+      + `<td>${prix(x.t)} $</td>`
+      + `<td>${ci.total ? fmt(x.t/ci.total*100,1)+" %" : "—"}</td></tr>`).join("");
+  const pc = v => ci.total ? fmt(v/ci.total*100,1)+" %" : "—";
+  t.innerHTML =
+    "<thead><tr><th>Poste</th><th>Quantite</th><th>Prix unitaire</th>"
+    + "<th>Cout par unite</th><th>Part</th></tr></thead><tbody>"
+    + (aRecette ? li : `<tr><td colspan="5" class="dim">Ressource de base : aucun intrant.</td></tr>`)
+    + `<tr><td>Main-d'oeuvre${ci.rob ? ' <span class="dim">(robots −3 %)</span>' : ""}</td>`
+    + `<td>${fmt(ci.prod,1)} u/h</td><td>${prix(ci.sal)} $/h</td>`
+    + `<td>${prix(ci.salU)} $</td><td>${pc(ci.salU)}</td></tr>`
+    + `<tr><td>Administration <span class="dim">(${fmt(P.ad,0)} %)</span></td>`
+    + `<td></td><td>${prix(ci.adm)} $/h</td>`
+    + `<td>${prix(ci.admU)} $</td><td>${pc(ci.admU)}</td></tr>`
+    + `<tr class="somme"><td><b>Cout de revient</b></td><td></td><td></td>`
+    + `<td><b>${prix(ci.total)} $</b></td><td></td></tr></tbody>`;
+  const C = JEU.const, mats = Object.entries(C.CONSTRUCTION)
+    .map(([kk, q]) => `${ent(q * bat.cu * P.niv)} ${nom(+kk).toLowerCase()}`).join(", ");
   document.getElementById("n_marge").innerHTML = bat
-    ? `<b>${bat.fr}</b> — ${bat.cu} unites de construction et `
-      + `${duree(bat.dur*1000)} par niveau, coefficient de salaire ${bat.sm}, `
-      + `jusqu'a <b>${robotsMax(bat)}</b> robot(s) par niveau. `
-      + `Niveaux : ${bat.paliers.join(", ") || "—"}.`
+    ? `<b>Monter un ${bat.fr} au niveau ${P.niv}</b> : ${mats}, et `
+      + `${duree(bat.dur * P.niv * 1000)} de chantier. Salaires `
+      + `${prix(ci.sal)} $/h plus ${prix(ci.adm)} $/h d'administration, par batiment. `
+      + `${robotsDispo(P.niv)} emplacement(s) de robot.`
     : "";
 }
 
 /* -------------------------------------------------------------- 2 · vendre */
-function rendVendre(k, r, p, tr, pT, bourse, contrat){
+function rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci){
   const a = document.getElementById("a_vendre"), t = document.getElementById("t_canal");
-  const tx = document.getElementById("tx_frais"); if(tx) tx.textContent = fmt(fraisB()*100,0);
-  const LV = batVente(k), bv = LV ? jbat(LV) : null;
   a.innerHTML = `La <b>bourse</b> prend ${fmt(fraisB()*100,0)} % de frais et le `
     + `transport plein ; le <b>contrat</b> ne prend aucun frais et la moitie du `
-    + `transport`
-    + (bv ? ` ; au <b>detail</b> il n'y a ni frais ni transport, mais il faut `
-          + `un ${bv.fr} et le debit y est plafonne.` : `.`);
+    + `transport, mais se negocie plus bas — le rabais est reglable ci-dessus. `
+    + (det ? `Le <b>detail</b> n'a ni frais ni transport : il paie le prix de `
+           + `detail du jeu, mais son debit est plafonne.`
+           : `Ce produit ne se vend pas au detail.`);
   if(p == null){ t.innerHTML = '<tbody><tr><td class="dim">Prix inconnu.</td></tr></tbody>';
-    document.getElementById("n_canal").textContent = ""; return; }
+    document.getElementById("n_canal").textContent = "";
+    document.getElementById("w_detail").hidden = true; return; }
   const coutT = (pT ?? 0) * (tr ?? 0);
+  const pc = p * (1 - P.rc/100);
   const l = (n, a2, b2, c2, cls) =>
     `<tr><td>${n}</td><td class="${cls||''}">${a2}</td>`
     + `<td class="${cls||''}">${b2}</td><td class="${cls||''}">${c2}</td></tr>`;
-  const detail = bv ? prix(p) + " $" : "—";
-  t.innerHTML = "<thead><tr><th>Par unite</th><th>Bourse</th><th>Contrat</th>"
-    + "<th>Detail</th></tr></thead><tbody>"
-    + l("Prix de reference", prix(p)+" $", prix(p)+" $", detail)
-    + l("Frais de marche", "− "+prix(p*fraisB())+" $", "aucun", bv ? "aucun" : "—")
+  const dP = det ? prix(det.prix)+" $" : "—";
+  t.innerHTML = "<thead><tr><th>Par unite</th><th>Bourse</th>"
+    + `<th>Contrat (−${fmt(P.rc,0)} %)</th><th>Detail</th></tr></thead><tbody>`
+    + l("Prix de vente", prix(p)+" $", prix(pc)+" $", dP)
+    + l("Frais de marche", "− "+prix(p*fraisB())+" $", "aucun", det ? "aucun" : "—")
     + l("Transport", tr === 0 ? "aucun" : "− "+prix(coutT)+" $",
                      tr === 0 ? "aucun" : "− "+prix(coutT/2)+" $",
-                     bv ? "aucun" : "—")
-    + `<tr><td><b>Net en poche</b></td>`
+                     det ? "aucun" : "—")
+    + l("Salaires du magasin", "—", "—",
+        det ? "− "+prix(det.salH/det.uph)+" $" : "—")
+    + `<tr class="somme"><td><b>Net en poche</b></td>`
     + `<td><b>${prix(bourse)} $</b></td>`
-    + `<td><b class="${contrat>=bourse?"up":""}">${prix(contrat)} $</b></td>`
-    + `<td><b class="${bv?"up":""}">${detail}</b></td></tr>`
-    + l("Ecart avec la bourse", "—", "+"+prix(contrat-bourse)+" $",
-        bv ? "+"+prix(p-bourse)+" $" : "—", "up")
+    + `<td><b class="${contrat>=bourse?"up":"down"}">${prix(contrat)} $</b></td>`
+    + `<td><b class="${det && det.net>=bourse?"up":""}">${det?prix(det.net)+" $":"—"}</b></td></tr>`
+    + l("Marge sur cout de revient",
+        prix(bourse - ci.total)+" $", prix(contrat - ci.total)+" $",
+        det ? prix(det.net - ci.total)+" $" : "—")
+    + l("Debit possible", court(ci.prod*P.nb)+" u/h", court(ci.prod*P.nb)+" u/h",
+        det ? court(det.uph*P.nb)+" u/h" : "—")
+    + `<tr class="somme"><td><b>Resultat</b></td>`
+    + `<td><b>${court((bourse-ci.total)*ci.prod*P.nb)} $/h</b></td>`
+    + `<td><b>${court((contrat-ci.total)*ci.prod*P.nb)} $/h</b></td>`
+    + `<td><b>${det?court((det.net-ci.total)*Math.min(det.uph,ci.prod)*P.nb)+" $/h":"—"}</b></td></tr>`
     + "</tbody>";
   document.getElementById("n_canal").innerHTML =
     (tr === 0
@@ -1295,12 +1471,37 @@ function rendVendre(k, r, p, tr, pT, bourse, contrat){
         + `economiser que les ${fmt(fraisB()*100,0)} % de frais. `
       : `Transport : <b>${tr}</b> unite(s) par unite vendue, au prix du `
         + `Transport (${prix(pT)} $ l'unite). `)
-    + (bv
-        ? `Vendu au detail en <b>${bv.fr}</b>, environ <b>${fmt(r.vph,1)} u/h</b> `
-          + `de reference par magasin — le detail paie mieux a l'unite, mais il `
-          + `ne prend qu'un debit limite.`
-        : `Ce produit ne se vend pas au detail : il n'a de debouche qu'en `
-          + `bourse, en contrat, ou dans une recette.`);
+    + `Les chiffres du detail sont ceux du modele du jeu ; si ton compte a une `
+    + `<b>acceleration</b>, regle-la ci-dessus pour retomber sur les valeurs de `
+    + `ton encyclopedie. `
+    + `Le rabais de contrat de ${fmt(P.rc,0)} % est le tien : descends-le `
+    + `jusqu'a ce que la colonne Contrat passe sous la Bourse, tu tiens ton `
+    + `prix plancher.`;
+  // ---- le detail, qualite par qualite
+  const w = document.getElementById("w_detail");
+  if(!det){ w.hidden = true; document.getElementById("n_detail").textContent = ""; return; }
+  w.hidden = false;
+  const qs = [0,1,2,3,4,5,6,7,8,9,10,11,12];
+  document.getElementById("t_detail").innerHTML =
+    "<thead><tr><th>Vente au detail</th>"
+    + qs.map(q => `<th>${q === 0 ? "Q0" : q+"★"}</th>`).join("") + "</tr></thead><tbody>"
+    + `<tr><td>Unites par heure</td>`
+    + qs.map(q => { const d2 = detailInfo(k, q);
+        return `<td>${d2 ? fmt(d2.uph,1) : "—"}</td>`; }).join("") + "</tr>"
+    + `<tr><td>Net par unite</td>`
+    + qs.map(q => { const d2 = detailInfo(k, q);
+        return `<td>${d2 ? prix(d2.net) : "—"}</td>`; }).join("") + "</tr>"
+    + `<tr class="somme"><td><b>Resultat par magasin</b></td>`
+    + qs.map(q => { const d2 = detailInfo(k, q);
+        return `<td><b>${d2 ? court((d2.net-ci.total)*d2.uph) : "—"}</b></td>`; }).join("")
+    + "</tr></tbody>";
+  document.getElementById("n_detail").innerHTML =
+    `Vendu en <b>${det.bat.fr}</b> de niveau ${P.niv}. Le prix de detail `
+    + `(<b>${prix(det.prix)} $</b>) est le meme pour toutes les qualites : dans `
+    + `ce jeu la qualite ne fait pas monter le prix, elle fait <b>vendre plus `
+    + `vite</b>. Saturation du marche : ${fmt(det.sat,2)} — au-dessus de 2, la `
+    + `demande est morte. Les salaires du magasin (${prix(det.salH)} $/h, admin `
+    + `comprise) sont deja deduits du net.`;
 }
 
 /* --------------------------------------------------------- 3 · transformer */
@@ -1310,40 +1511,47 @@ function rendTransformer(k, r){
     a.innerHTML = `Aucune recette ne consomme <b>${nom(k)}</b> : c'est un produit `
       + `de bout de chaine, il ne se vend que tel quel.`;
     t.innerHTML = ""; return; }
-  a.innerHTML = `Les recettes qui consomment ce produit, classees par marge `
-    + `horaire. La marge est celle du produit fini, tous intrants achetes aux `
-    + `prix de reference : elle repond a « je revends, ou je transforme ? ».`;
+  a.innerHTML = `Les recettes qui consomment ce produit, classees par resultat `
+    + `horaire. Chacune est calculee avec TES reglages : ${P.nb} batiment(s) de `
+    + `niveau ${P.niv}, salaires et administration compris, intrants aux prix de `
+    + `reference. C'est la reponse a « je revends, ou je transforme ? ».`;
+  const pT = pxRef(KIND_TRANSPORT);
   const l = r.util.map(x => {
-    const ra = jr(x), ci = coutIntrants(x);
+    const ra = jr(x), ci = coutRevient(x);
     const v = pxRef(x), bt = jbat(ra.at);
-    const trx = ra.t, pT = pxRef(KIND_TRANSPORT);
-    const net = v == null ? null : v * (1 - fraisB()) - (pT ?? 0) * (trx ?? 0);
+    const net = v == null ? null : v * (1 - fraisB()) - (pT ?? 0) * (ra.t ?? 0);
     const m = (net != null && ci) ? net - ci.total : null;
-    const cad = prodHoraire(x, 1, 0);
     return {x, qte: ra.de[String(k)], v, cout: ci ? ci.total : null, m, bat: bt,
-            h: (m != null && cad != null) ? m * cad : null, trou: ci && ci.trou};
+            prod: ci ? ci.prod : null,
+            h: (m != null && ci) ? m * ci.prod * P.nb : null, trou: ci && ci.trou};
   }).sort((u, w) => (w.h ?? -1e18) - (u.h ?? -1e18));
   t.innerHTML =
     "<thead><tr><th>Produit</th><th>Fabrique en</th><th>En consomme</th>"
-    + "<th>Prix</th><th>Cout intrants</th><th>Marge/u</th><th>Marge/h</th></tr></thead><tbody>"
+    + "<th>Prix</th><th>Cout de revient</th><th>Marge/u</th><th>Debit</th>"
+    + "<th>Resultat</th></tr></thead><tbody>"
     + l.map(x => `<tr><td>${lienRes(x.x)}</td>`
         + `<td>${x.bat ? x.bat.fr : "—"}</td>`
         + `<td>${fmt(x.qte, x.qte < 1 ? 4 : 0)}</td>`
         + `<td>${prix(x.v)} $</td>`
         + `<td>${prix(x.cout)} $${x.trou ? ' <span class="down" title="un intrant sans prix connu">*</span>' : ""}</td>`
         + `<td class="${(x.m||0)>=0?"up":"down"}">${prix(x.m)} $</td>`
+        + `<td>${x.prod==null?"—":court(x.prod*P.nb)+" u/h"}</td>`
         + `<td class="${(x.h||0)>=0?"up":"down"}">${x.h==null?"—":court(x.h)+" $/h"}</td></tr>`).join("")
     + "</tbody>";
 }
 
 /* ------------------------------------------------- saisie des prix imposes */
 document.addEventListener("input", e => {
-  const c = e.target;
-  if(!c.classList || !c.classList.contains("px")) return;
-  poserPrix(+c.dataset.k, c.value === "" ? null : parseFloat(c.value));
-  c.classList.toggle("perso", estPerso(+c.dataset.k));
+  const c = e.target; if(!c.classList) return;
+  if(c.classList.contains("px")){
+    poserPrix(+c.dataset.k, c.value === "" ? null : parseFloat(c.value));
+    c.classList.toggle("perso", estPerso(+c.dataset.k));
+  } else if(!c.closest || !c.closest("#reglages")) return;
   clearTimeout(window.__tPerso);
-  window.__tPerso = setTimeout(() => { if(VUE === "produit") rendEco(KIND); }, 400);
+  window.__tPerso = setTimeout(() => { if(VUE === "produit") rendEco(KIND); }, 350);
+});
+document.addEventListener("change", e => {
+  if(e.target && e.target.id === "p_rob" && VUE === "produit") rendEco(KIND);
 });
 document.addEventListener("click", e => {
   if(e.target && e.target.id === "b_perso"){
@@ -1462,8 +1670,10 @@ async function rendProduit(){
     + (bj ? ` <span class="dim" style="font-weight:400;font-size:13px">`
           + `· ${bj.fr}${rj.hb ? " · hors bourse" : ""}`
           + `${rj.rech ? " · recherche" : ""}</span>` : "");
+  const vif = meilleurCarnet(k, SELQ.size === QUALITES.length ? null : SELQ);
+  const pAff = vif ?? r.meilleur;
   document.getElementById("t_produit").innerHTML =
-    tuile("Meilleur prix", prix(r.meilleur)+" $",
+    tuile("Meilleur prix", prix(pAff)+" $",
           vieux!=null ? "carnet lu "+(duree(vieux)==="a l'instant"?"a l'instant":"il y a "+duree(vieux)) : "") +
     tuile("Variation", r.varp==null?"—":(r.varp>=0?"+":"")+fmt(r.varp,2)+" %",
           "sur "+(HEURES?HEURES+" h":"tout l'historique"), r.varp>=0?"up":"down") +

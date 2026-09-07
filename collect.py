@@ -112,6 +112,10 @@ print = functools.partial(print, flush=True)
 
 REALM = 0
 TICKER = f"https://www.simcompanies.com/api/v3/market-ticker/{REALM}/"
+# Le detail : prix moyen et saturation par ressource, un seul appel pour
+# les 60 produits vendables. Ces valeurs bougent au jour le jour, pas a la
+# minute : une lecture par cycle suffit largement.
+DETAIL_URL = "https://www.simcompanies.com/api/v4/%d/resources-retail-info/"
 BOOK = "https://www.simcompanies.com/api/v3/market/all/%d/%d/"
 UA = "Mozilla/5.0 (compatible; simco-market-logger/3.0)"
 
@@ -548,6 +552,30 @@ def flt(x):
         return float(x)
     except (TypeError, ValueError):
         return None
+
+
+EN_DETAIL = ["kind", "prix", "saturation"]
+
+def lire_detail():
+    """Prix de detail et saturation. Un echec n'est pas grave : le tableau
+    de bord garde l'instantane embarque dans jeu.json."""
+    try:
+        d = fetch(DETAIL_URL % REALM, tries=1, cadence=True)
+    except Exception:
+        return None
+    if not isinstance(d, list):
+        return None
+    lignes = []
+    for e in d:
+        if not isinstance(e, dict) or e.get("quality") is not None:
+            continue
+        p = e.get("averagePrice")
+        if p is None or p <= 0:
+            continue
+        lignes.append([e.get("dbLetter"), round(float(p), 4),
+                       round(float(e.get("saturation") or 1), 6)])
+    lignes.sort(key=lambda r: r[0])
+    return lignes or None
 
 
 def pousser_live(fichiers):
@@ -1346,6 +1374,13 @@ def fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat=None,
         "heure_prix.csv": en_csv(EN_PRIX, lignes_prix(pxh)),
         "prix.csv": en_csv(EN_INSTANT, lignes_instant(instant)),
     }
+    # Le detail ne bouge qu'une fois par jour : on ne le relit qu'au dernier
+    # envoi d'un run, et un echec laisse simplement le fichier tel quel.
+    if final:
+        det = lire_detail()
+        if det:
+            fichiers["detail.csv"] = en_csv(EN_DETAIL, det)
+            print(f"  detail : {len(det)} prix de vente au detail")
     # L'etat voyage avec le carnet, dans le MEME commit : impossible
     # d'enregistrer les donnees sans enregistrer ou on en est, ou l'inverse.
     if etat:
