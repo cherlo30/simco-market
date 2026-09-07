@@ -196,6 +196,11 @@ tr.somme td{border-top:1px solid var(--bord);font-weight:600}
 
 tr.groupe td{background:var(--surf2);border-top:1px solid var(--bord);
   padding-top:11px;color:var(--ink2);text-align:left}
+
+.reglages select{font:inherit;font-size:12.5px;padding:3px 6px;
+  border:1px solid var(--bord);border-radius:6px;background:var(--surf);
+  color:var(--ink)}
+.reglages select:focus{outline:none;border-color:var(--s1)}
 </style>
 </head>
 <body>
@@ -268,7 +273,8 @@ tr.groupe td{background:var(--surf2);border-top:1px solid var(--bord);
       <label>Niveau du magasin <input id="m_niv" type="number" min="1" max="30" step="1" value="1"></label>
       <label>Bonus vente %     <input id="m_bv"  type="number" min="0" max="99" step="1" value="0"></label>
       <label>Frais admin %     <input id="m_ad"  type="number" min="0" max="99" step="1" value="10"></label>
-      <label>Acceleration      <input id="m_ac"  type="number" min="0.1" max="5" step="0.01" value="1"></label>
+      <label>Etat economie
+        <select id="m_eco"><option value="0">0 · bas</option><option value="1" selected>1 · normal</option><option value="2">2 · haut</option></select></label>
     </div>
     <div class="tbl" style="margin-top:10px"><table id="t_mag"></table></div>
     <p class="aide" id="n_mag" style="margin-top:8px"></p>
@@ -323,7 +329,8 @@ tr.groupe td{background:var(--surf2);border-top:1px solid var(--bord);
       <label>Bonus vente %      <input id="p_bv" type="number" min="0" max="99" step="1" value="0"></label>
       <label>Frais admin %      <input id="p_ad" type="number" min="0" max="99" step="1" value="10"></label>
       <label>Rabais contrat %   <input id="p_rc" type="number" min="0" max="90" step="1" value="5"></label>
-      <label title="Multiplicateur d'acceleration de ton compte, lisible dans l'encyclopedie du jeu. 1 = aucun.">Acceleration <input id="p_ac" type="number" min="0.1" max="5" step="0.01" value="1"></label>
+      <label title="Etat global de l'economie du jeu : il change les salaires de reference et le modele de detail. Observe a 1 le 7 septembre 2026.">Etat economie
+        <select id="p_eco"><option value="0">0 · bas</option><option value="1" selected>1 · normal</option><option value="2">2 · haut</option></select></label>
       <span class="dim" id="n_reglages"></span>
     </div>
 
@@ -395,7 +402,7 @@ const L = f => DEPOT + (SHA || "refs/heads/live") + "/" + f;
    jeu.json contient tout ce que la bourse ne dit pas : recettes, cadence de
    production, batiments, transport, frais de marche. Extrait du bundle du
    jeu, il est charge une fois et sert ensuite a tous les calculs.       */
-let JEU = null, DETAIL = null;
+let JEU = null, DETAIL = null, RESTO = null;
 async function chargeJeu(){
   if(JEU) return JEU;
   for(const u of ["jeu.json", HIST + "jeu.json"]){
@@ -409,11 +416,15 @@ async function chargeDetail(){
   const t = await charge(L("detail.csv"));
   if(!t) return null;
   const d = {};
+  const rs = {};
   for(const r of csv(t)){
-    const p = num(r.prix), s = num(r.saturation);
-    if(r.kind && p != null) d[String(+r.kind)] = [p, s ?? 1];
+    const p = num(r.prix), s = num(r.saturation), v = num(r.restaurant);
+    if(!r.kind) continue;
+    if(p != null) d[String(+r.kind)] = [p, s ?? 1];
+    if(v) rs[String(+r.kind)] = [p || 0, v];
   }
   if(Object.keys(d).length) DETAIL = d;
+  if(Object.keys(rs).length) RESTO = rs;
   return DETAIL;
 }
 const jr   = k => JEU && JEU.res[k] ? JEU.res[k] : null;
@@ -1250,7 +1261,7 @@ const FRAIS_BOURSE_DEFAUT = 0.04;
 const fraisB = () => (typeof fraisBourse === "function" ? fraisBourse() : FRAIS_BOURSE_DEFAUT);
 const KIND_TRANSPORT = 13;
 
-const P = {nb:1, niv:1, rob:false, bp:0, bv:0, ad:10, rc:5, accel:1};
+const P = {nb:1, niv:1, rob:false, bp:0, bv:0, ad:10, rc:5, accel:1, eco:1};
 function litReglages(){
   const n = (id, d) => { const e = document.getElementById(id);
     const v = e ? parseFloat(e.value) : NaN; return isFinite(v) ? v : d; };
@@ -1260,7 +1271,7 @@ function litReglages(){
   P.bv  = Math.min(99, Math.max(0, n("p_bv", 0)));
   P.ad  = Math.max(0, n("p_ad", 10));
   P.rc  = Math.min(90, Math.max(0, n("p_rc", 5)));
-  P.accel = Math.max(0.1, n("p_ac", 1));
+  P.eco = String(Math.min(2, Math.max(0, Math.round(n("p_eco", 1)))));
   const c = document.getElementById("p_rob"); P.rob = c ? c.checked : false;
 }
 const estMine = k => JEU && JEU.const.MINES.includes(+k);
@@ -1271,8 +1282,9 @@ const modifJeu = k => 0;
 function prodHoraire(k, niv, bonus){
   const r = jr(k); if(!r || !JEU) return null;
   const b = jbat(r.at), C = JEU.const;
-  const base = r.pph * Math.pow(C.AVERAGE_SALARY / C.SALARY_MID[String(JEU.meta.realm)],
-                                b ? b.sm : 1);
+  const base = r.pph * Math.pow(
+    C.AVERAGE_SALARY / C.SALARY_MID_PAR_ETAT_ECONOMIQUE[String(P.eco)],
+    b ? b.sm : 1);
   const ab = estMine(k) ? C.ABONDANCE_MINE : 1;
   return (niv || 1) * base * ab * (1 + modifJeu(k)/100) / (1 - (bonus || 0)/100);
 }
@@ -1312,7 +1324,9 @@ function coutRevient(k){
 function detailInfo(k, q, opt){
   const R = opt || P;
   if(!JEU || !JEU.detail_modele) return null;
-  const m = JEU.detail_modele[String(k)]; if(!m) return null;
+  const R0 = opt || P;
+  const table = JEU.detail_modele[String(R0.eco ?? 1)] || JEU.detail_modele["1"];
+  const m = table[String(k)]; if(!m) return null;
   const L = batVente(k); if(!L) return null;
   const b = jbat(L); if(!b) return null;
   const viv = (DETAIL && DETAIL[String(k)]) || JEU.detail_repli[String(k)];
@@ -1351,6 +1365,18 @@ function batVente(k){
     if(L !== "r" && liste.includes(+k)) return L;
   return null;
 }
+/* Le restaurant n'est PAS un magasin comme les autres : le jeu ne modelise
+   pas son debit dans l'encyclopedie (il exige un directeur financier avec
+   comptabilite 5+). On n'invente donc rien — on montre ce qui est publie :
+   le prix moyen quand il existe, et le volume vendu par jour sur TOUT le
+   serveur, qui dit la taille du debouche, pas ce qu'un restaurant ecoule. */
+function infoResto(k){
+  if(!JEU || !JEU.restaurant) return null;
+  if(!JEU.restaurant.produits.includes(+k)) return null;
+  const v = (RESTO && RESTO[String(k)]) || JEU.restaurant.repli[String(k)] || [0, 0];
+  const b = jbat(JEU.restaurant.batiment);
+  return {prix: v[0] || null, serveur: v[1] || 0, bat: b};
+}
 function robotsMax(b){
   const C = JEU.const;
   const n = b.sm * (C.AVERAGE_SALARY * 24 * 7 * 5 * 0.03) / C.ROBOT_COST;
@@ -1368,12 +1394,23 @@ function rendEco(k){
   const bourse  = p == null ? null : p * (1 - fraisB()) - coutT;
   const contrat = p == null ? null : p * (1 - P.rc/100) - coutT / 2;
   const det = r ? detailInfo(k, [...SELQ][0] ?? 0) : null;
-  const canaux = [bourse, contrat, det ? det.net : null].filter(x => x != null);
-  const net = canaux.length ? Math.max(...canaux) : null;
+  const rst = r ? infoResto(k) : null;
+  /* Le benefice net, c'est la marge FOIS ce qu'on arrive reellement a
+     ecouler — pas la marge fois la production. Le detail paie mieux a
+     l'unite mais son debit est plafonne : un canal qui rapporte 12 $ sur
+     47 unites perd contre un canal a 2 $ sur 400. On calcule donc chaque
+     canal avec SON debit, et on garde le meilleur.                     */
+  const prod = ci ? ci.prod : null;
+  const cands = [];
+  if(bourse  != null && prod != null) cands.push({n:"bourse",  u:bourse,  q:prod});
+  if(contrat != null && prod != null) cands.push({n:"contrat", u:contrat, q:prod});
+  if(det && prod != null) cands.push({n:"detail", u:det.net, q:Math.min(det.uph, prod)});
+  for(const c of cands) c.res = (c.u - (ci ? ci.total : 0)) * c.q * P.nb;
+  const best = cands.length ? cands.reduce((a,b) => b.res > a.res ? b : a) : null;
+  const net = best ? best.u : null;
   const marge = (net != null && ci) ? net - ci.total : null;
-  // le detail plafonne le debit : on ne peut pas ecouler plus que uph
-  const debit = ci ? ci.prod : null;
-  const totalH = (marge != null && debit != null) ? marge * debit * P.nb : null;
+  const debit = best ? best.q : prod;
+  const totalH = best ? best.res : null;
 
   document.getElementById("n_perso").textContent = PERSO.size
     ? `${PERSO.size} prix impose${PERSO.size>1?"s":""} — les calculs les utilisent.`
@@ -1391,13 +1428,16 @@ function rendEco(k){
     + tuile("Cout de revient", ci ? prix(ci.total) + " $" : "—",
             ci ? "intrants + salaires + admin" : "")
     + tuile("Marge unitaire", marge == null ? "—" : prix(marge) + " $",
-            "meilleur canal, net de tout", (marge || 0) >= 0 ? "up" : "down")
-    + tuile("Resultat estime", totalH == null ? "—" : court(totalH) + " $/h",
-            ci ? `${P.nb} x niveau ${P.niv} · ${court((debit||0)*P.nb)} u/h`
+            best ? "en " + best.n + ", net de tout" : "", (marge || 0) >= 0 ? "up" : "down")
+    + tuile("Benefice net", totalH == null ? "—" : court(totalH) + " $/h",
+            best ? `${P.nb} batiment(s) niveau ${P.niv} · ${court(debit*P.nb)} u/h `
+                 + `ecoulees en ${best.n}`
+                 + (best.n === "detail" && det && det.uph < prod
+                     ? ` (debit plafonne)` : "")
                : "", (totalH || 0) >= 0 ? "up" : "down");
 
   rendProduire(k, r, ci, bat);
-  rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci);
+  rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci, rst);
   rendTransformer(k, r);
 }
 
@@ -1447,14 +1487,16 @@ function rendProduire(k, r, ci, bat){
 }
 
 /* -------------------------------------------------------------- 2 · vendre */
-function rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci){
+function rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci, rst){
   const a = document.getElementById("a_vendre"), t = document.getElementById("t_canal");
   a.innerHTML = `La <b>bourse</b> prend ${fmt(fraisB()*100,0)} % de frais et le `
     + `transport plein ; le <b>contrat</b> ne prend aucun frais et la moitie du `
     + `transport, mais se negocie plus bas — le rabais est reglable ci-dessus. `
     + (det ? `Le <b>detail</b> n'a ni frais ni transport : il paie le prix de `
            + `detail du jeu, mais son debit est plafonne.`
-           : `Ce produit ne se vend pas au detail.`);
+       : rst ? `Ce produit se vend en <b>${rst.bat ? rst.bat.fr : "restaurant"}</b>, `
+           + `qui a sa propre mecanique — voir plus bas.`
+           : `Ce produit ne se vend qu'en bourse ou en contrat.`);
   if(p == null){ t.innerHTML = '<tbody><tr><td class="dim">Prix inconnu.</td></tr></tbody>';
     document.getElementById("n_canal").textContent = "";
     document.getElementById("w_detail").hidden = true; return; }
@@ -1501,7 +1543,20 @@ function rendVendre(k, r, p, tr, pT, bourse, contrat, det, ci){
     + `prix plancher.`;
   // ---- le detail, qualite par qualite
   const w = document.getElementById("w_detail");
-  if(!det){ w.hidden = true; document.getElementById("n_detail").textContent = ""; return; }
+  if(!det){
+    w.hidden = true;
+    document.getElementById("n_detail").innerHTML = rst
+      ? `<b>Vendu en ${rst.bat ? rst.bat.fr : "restaurant"}.</b> `
+        + (rst.prix ? `Prix moyen releve : <b>${prix(rst.prix)} $</b> — `
+                    + `${fmt((rst.prix / (pxMarche(k) || rst.prix) - 1) * 100, 0)} % `
+                    + `au-dessus du prix de bourse. ` : `Le jeu ne publie pas de prix moyen pour ce plat. `)
+        + `Tout le serveur en ecoule <b>${court(rst.serveur)} unites par jour</b>. `
+        + `<b>Je ne convertis pas ce chiffre en debit par restaurant</b> : le jeu `
+        + `lui-meme ne modelise pas le restaurant dans son encyclopedie (il `
+        + `demande un directeur financier avec comptabilite 5 ou plus). Ce `
+        + `serait une invention, pas un calcul.`
+      : "";
+    return; }
   w.hidden = false;
   const qs = [0,1,2,3,4,5,6,7,8,9,10,11,12];
   document.getElementById("t_detail").innerHTML =
@@ -1576,7 +1631,9 @@ document.addEventListener("input", e => {
   window.__tPerso = setTimeout(() => { if(VUE === "produit") rendEco(KIND); }, 350);
 });
 document.addEventListener("change", e => {
-  if(e.target && e.target.id === "p_rob" && VUE === "produit") rendEco(KIND);
+  const c = e.target; if(!c) return;
+  if((c.id === "p_rob" || c.id === "p_eco") && VUE === "produit") rendEco(KIND);
+  if(c.id === "m_eco") rendMagasins();
 });
 document.addEventListener("click", e => {
   if(e.target && e.target.id === "b_perso"){
@@ -1597,16 +1654,18 @@ function reglagesMagasin(){
   const n = (id, d) => { const e = document.getElementById(id);
     const v = e ? parseFloat(e.value) : NaN; return isFinite(v) ? v : d; };
   const c = document.getElementById("m_rob");
+  const e = document.getElementById("m_eco");
   return {niv: Math.max(1, n("m_niv", 1)), bv: Math.max(0, n("m_bv", 0)),
-          ad: Math.max(0, n("m_ad", 10)), accel: Math.max(0.1, n("m_ac", 1)),
-          nb: 1, rob: c ? c.checked : false};
+          ad: Math.max(0, n("m_ad", 10)), accel: 1,
+          eco: e ? e.value : "1", nb: 1, rob: c ? c.checked : false};
 }
 function rendMagasins(){
   const t = document.getElementById("t_mag"); if(!t || !JEU) return;
   const R = reglagesMagasin();
   const QS = [0, 3, 6, 9, 12];
   const par = new Map();
-  for(const k of Object.keys(JEU.detail_modele)){
+  const table = JEU.detail_modele[String(R.eco ?? 1)] || JEU.detail_modele["1"];
+  for(const k of Object.keys(table)){
     const d = detailInfo(+k, 0, R); if(!d) continue;
     const l = par.get(d.lettre) || {bat: d.bat, lignes: []};
     l.lignes.push({k: +k, d, q: QS.map(q => detailInfo(+k, q, R))});

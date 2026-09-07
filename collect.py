@@ -491,6 +491,12 @@ def charger_live():
         s = git("show", f"FETCH_HEAD:{nom}")
         return lire_csv(s.stdout, entete) if s.returncode == 0 else []
 
+    # La branche live est reecrite ENTIERE a chaque envoi : un fichier absent
+    # de la liste disparait. Les fichiers qu'on ne regenere pas a tous les
+    # runs doivent donc etre recopies tels quels.
+    s = git("show", "FETCH_HEAD:detail.csv")
+    DETAIL_GARDE[0] = s.stdout if s.returncode == 0 and s.stdout.strip() else None
+
     ordres = {}
     for k, q, oid, sid, p, qt, dl, dep, psg in lire("ordres.csv", EN_ORDRES):
         ordres[oid] = {"kind": int(k), "q": int(q), "sid": sid, "p": float(p),
@@ -556,9 +562,23 @@ def flt(x):
 
 EN_DETAIL = ["kind", "prix", "saturation", "restaurant"]
 
-def lire_detail():
+DETAIL_HEURES = float(os.environ.get("DETAIL_HEURES", "6"))
+DETAIL_GARDE = [None]        # le detail.csv deja en ligne
+
+def lire_detail(force=False):
     """Prix de detail et saturation. Un echec n'est pas grave : le tableau
-    de bord garde l'instantane embarque dans jeu.json."""
+    de bord garde l'instantane embarque dans jeu.json.
+
+    Cette requete est FACULTATIVE et le restera. Elle rapporte 300 ko pour
+    des valeurs qui ne bougent qu'une fois par jour : la payer au prix d'une
+    attente de quota, en fin de run, quand la fenetre est justement pleine
+    des LOT carnets qu'on vient de lire, c'etait doubler la duree du run pour
+    une donnee qui n'avait pas change. On ne la prend donc que si une place
+    est libre TOUT DE SUITE ; sinon on repasse au prochain run. Si la donnee
+    devient vraiment vieille, on finit par payer l'attente une fois : mieux
+    vaut un run long tous les douze heures qu'un fichier fige."""
+    if not slot_libre() and not force:
+        return None
     try:
         d = fetch(DETAIL_URL % REALM, tries=1, cadence=True)
     except Exception:
@@ -1381,11 +1401,21 @@ def fermer_et_envoyer(ordres, agg, volp, pxh, instant, etat=None,
     }
     # Le detail ne bouge qu'une fois par jour : on ne le relit qu'au dernier
     # envoi d'un run, et un echec laisse simplement le fichier tel quel.
-    if final:
-        det = lire_detail()
-        if det:
-            fichiers["detail.csv"] = en_csv(EN_DETAIL, det)
-            print(f"  detail : {len(det)} prix de vente au detail")
+    # On recopie d'abord ce qui est deja en ligne, pour ne jamais le perdre.
+    if DETAIL_GARDE[0]:
+        fichiers["detail.csv"] = DETAIL_GARDE[0]
+    if final and etat is not None:
+        age = time.time() - float(etat.get("detail_le") or 0)
+        if age >= DETAIL_HEURES * 3600:
+            # au-dela du double du delai, on attend un creneau plutot que de
+            # laisser le fichier vieillir indefiniment
+            det = lire_detail(force=age >= 2 * DETAIL_HEURES * 3600)
+            if det:
+                fichiers["detail.csv"] = en_csv(EN_DETAIL, det)
+                DETAIL_GARDE[0] = fichiers["detail.csv"]
+                etat["detail_le"] = round(time.time(), 1)
+                print(f"  detail : {len(det)} prix de vente au detail "
+                      f"(prochaine lecture dans {DETAIL_HEURES:g} h)")
     # L'etat voyage avec le carnet, dans le MEME commit : impossible
     # d'enregistrer les donnees sans enregistrer ou on en est, ou l'inverse.
     if etat:
